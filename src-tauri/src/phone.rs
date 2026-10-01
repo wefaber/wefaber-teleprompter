@@ -150,7 +150,7 @@ fn new_token() -> String {
     buf.iter().map(|b| format!("{b:02x}")).collect()
 }
 
-fn tailscale(args: &[&str]) -> Result<std::process::Output, String> {
+pub(crate) fn tailscale(args: &[&str]) -> Result<std::process::Output, String> {
     let exe = std::env::var("TAILSCALE_EXE").unwrap_or_else(|_| TAILSCALE.into());
     let mut cmd = std::process::Command::new(&exe);
     cmd.args(args);
@@ -164,7 +164,7 @@ fn tailscale(args: &[&str]) -> Result<std::process::Output, String> {
 }
 
 /// El nombre de esta PC en la tailnet, sin el punto final.
-fn tailscale_host() -> Result<String, String> {
+pub(crate) fn tailscale_host() -> Result<String, String> {
     let out = tailscale(&["status", "--json"])?;
     if !out.status.success() {
         return Err("Tailscale no está conectado".into());

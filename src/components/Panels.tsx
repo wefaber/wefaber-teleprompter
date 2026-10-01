@@ -1,3 +1,5 @@
+import { Group, Range, Segmented, Toggle } from "./controls";
+import { EngineSettings } from "./EngineSettings";
 import { Download, X } from "lucide-react";
 import type { ReactNode } from "react";
 import { ASPECTS, CAPTURE_MODES, type Aspect, type Rotation } from "../lib/camera";
@@ -87,78 +89,6 @@ export function Outline({ doc, index, onJump }: { doc: Doc; index: number; onJum
   );
 }
 
-function Group({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <fieldset className="m-0 mt-6 flex flex-col gap-3 border-0 p-0">
-      <legend className="eyebrow mb-3 p-0 text-[0.72rem] font-bold text-[var(--muted)]">{label}</legend>
-      {children}
-    </fieldset>
-  );
-}
-
-function Segmented<T extends string>({
-  value,
-  options,
-  onChange,
-  label,
-}: {
-  value: T;
-  options: { value: T; label: string }[];
-  onChange: (v: T) => void;
-  label: string;
-}) {
-  return (
-    <div role="radiogroup" aria-label={label} className="flex rounded-lg border border-[var(--edge)] p-0.5">
-      {options.map((o) => (
-        <button
-          key={o.value}
-          type="button"
-          role="radio"
-          aria-checked={value === o.value}
-          onClick={() => onChange(o.value)}
-          className={`flex-1 rounded-md px-3 py-1.5 text-sm ${value === o.value ? "bg-[var(--ink)] text-[var(--bg)]" : "hover:bg-[var(--faint)]"}`}
-        >
-          {o.label}
-        </button>
-      ))}
-    </div>
-  );
-}
-
-function Range(props: { id: string; label: string; value: number; min: number; max: number; step: number; unit?: string; onChange: (v: number) => void }) {
-  return (
-    <label htmlFor={props.id} className="flex flex-col gap-1 text-sm">
-      <span className="flex justify-between">
-        {props.label}
-        <span className="font-mono tabular-nums text-[var(--muted)]">
-          {props.unit === "x" ? props.value.toFixed(2) + "x" : `${props.value}${props.unit ?? ""}`}
-        </span>
-      </span>
-      <input
-        id={props.id}
-        type="range"
-        min={props.min}
-        max={props.max}
-        step={props.step}
-        value={props.value}
-        onChange={(e) => props.onChange(Number(e.target.value))}
-      />
-    </label>
-  );
-}
-
-function Toggle({ id, label, hint, checked, onChange }: { id: string; label: string; hint?: string; checked: boolean; onChange: (v: boolean) => void }) {
-  return (
-    <label htmlFor={id} className="flex cursor-pointer items-start justify-between gap-4 text-sm">
-      <span>
-        {label}
-        {hint && <span className="block text-xs text-[var(--muted)]">{hint}</span>}
-      </span>
-      <input id={id} type="checkbox" className="mt-1 size-4 accent-[var(--ink)]" checked={checked} onChange={(e) => onChange(e.target.checked)} />
-    </label>
-  );
-}
-
 type SettingsProps = {
   settings: Settings;
   onChange: (patch: Partial<Settings>) => void;
@@ -177,11 +107,13 @@ type SettingsProps = {
   /** El tamaño con que abrió la cámara, si abrió. */
   cameraMode: string | null;
   voice: { output: string | null; headphones: boolean; enabled: boolean; error: string | null; test: () => void };
+  /** Escuchando: no se puede medir la PC mientras tanto. */
+  listening: boolean;
 };
 
 const mb = (n: number) => `${Math.round(n / 1_048_576)} MB`;
 
-export function SettingsPanel({ settings, onChange, engine, inputs, model, progress, modelError, onDownload, llmOk, llmError, cameras, mics, cameraMode, phone, voice }: SettingsProps) {
+export function SettingsPanel({ settings, onChange, engine, inputs, model, progress, modelError, onDownload, llmOk, llmError, cameras, mics, cameraMode, phone, voice, listening }: SettingsProps) {
   const isPhone = settings.cameraDevice === PHONE_CAMERA;
   return (
     <div>
@@ -563,9 +495,14 @@ export function SettingsPanel({ settings, onChange, engine, inputs, model, progr
               </div>
             )}
             {modelError && <p className="m-0 text-xs text-[var(--color-signal)]">{modelError}</p>}
-            <p className="m-0 text-xs text-[var(--muted)]">Corre en esta PC. El audio no sale de acá.</p>
+            <p className="m-0 text-xs text-[var(--muted)]">
+              {settings.sttMode === "local"
+                ? "Hace falta para reconocer en esta PC."
+                : "Hace falta para reconocer en esta PC o compartirla; con otra PC o xAI no."}
+            </p>
           </div>
         )}
+        {model && <EngineSettings settings={settings} onChange={onChange} modelPresent={model.present} listening={listening} />}
       </Group>
     </div>
   );

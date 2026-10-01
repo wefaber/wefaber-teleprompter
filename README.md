@@ -10,8 +10,10 @@ whitescreen: blanco, frío, cálido o cualquier color, con brillo regulable, y u
 modo "solo luz" que esconde el texto.
 
 El reconocimiento de voz corre en la PC con **Parakeet TDT 0.6B v3** (ONNX
-int8, vía [`transcribe-rs`](https://github.com/cjpais/transcribe-rs)). El audio
-no sale de la máquina y anda sin internet una vez bajado el modelo.
+int8, vía [`transcribe-rs`](https://github.com/cjpais/transcribe-rs)), con la
+GPU o NPU si hay. El audio no sale de la máquina y anda sin internet una vez
+bajado el modelo. Una PC que no da la velocidad puede usar otra de la tailnet o
+xAI (ver [Motores de voz](#motores-de-voz)).
 
 ## Estructura
 
@@ -35,6 +37,10 @@ no sale de la máquina y anda sin internet una vez bajado el modelo.
 | `src-tauri/src/segmenter.rs` | Corta en frases por energía y pide parciales mientras hablás. |
 | `src-tauri/src/stt.rs` | Hilo de transcripción y eventos a la interfaz. |
 | `src-tauri/src/model.rs` | Dónde vive el modelo y su descarga. |
+| `src-tauri/src/engine.rs` | Motores de voz: hardware, medición, acelerador, otra PC, xAI y la elección automática. |
+| `src-tauri/src/share.rs` | Compartir el reconocimiento de esta PC con la tailnet (puerto 5191, con clave). |
+| `src/lib/engine.ts` | El lado interfaz de los motores y los términos del guion para xAI. |
+| `src-tauri/assets/bench-es.pcm` | 7 s de voz para medir la PC (16 kHz mono s16le). |
 
 ## Requisitos (Windows)
 
@@ -79,10 +85,6 @@ claves: mcp, agente, eme ce pe
 nota: recordatorio que se ve en naranja
 ```
 
-- **Varios guiones**: en el editor (E) se crean, duplican, renombran y borran;
-  el que queda elegido al guardar es el que se usa. En el índice (O) se cambia
-  rápido. Cambiar de guion arranca del primer punto, con el reloj en cero.
-  Abrir un `.md` lo suma como guion nuevo.
 - Las **claves** son lo que vas a decir de verdad, separadas por comas. Pueden
   ser frases.
 - El título, las viñetas y el nombre de la sección también cuentan, con menos
@@ -114,6 +116,37 @@ suelto de antes queda como el primero.
 - Abajo del punto actual se ve el que sigue, con sus viñetas.
 - Sensibilidad baja, media o alta en Ajustes; "Avanzar solo" apagado deja solo
   el tachado y avanzás a mano.
+
+## Motores de voz
+
+Ajustes → Voz → **Dónde se reconoce**:
+
+- **Automático** (por defecto): la primera vez que escuchás mide esta PC con
+  7 s de voz grabada (`src-tauri/assets/bench-es.pcm`), con cada acelerador
+  que tenga: **DirectML** (cualquier GPU o NPU en Windows: NVIDIA, AMD, Intel,
+  Copilot+) y **CPU**. Se queda con el más rápido. Si ni ese llega a ir en
+  vivo (más de medio segundo por segundo de audio), usa la otra PC; si no hay,
+  xAI; si tampoco, sigue en esta PC con un aviso. La medición se guarda en
+  `%APPDATA%
+et.wefaber.apuntadormotor.json` y se repite sola si cambia el
+  hardware; "Medir de nuevo" la fuerza.
+- **Esta PC**: siempre local. Se puede forzar el acelerador.
+- **Otra PC**: una PC de la tailnet con el modelo activa **Compartir esta PC**.
+  Eso levanta un servidor en `127.0.0.1:5191` y lo publica con
+  `tailscale serve` solo dentro de la tailnet (no Funnel), pidiendo una clave
+  que queda en `compartir.clave`. En la PC lenta se pega la dirección
+  (`https://pc.tailnet.ts.net:5191`) y la clave, y "Probar" confirma. Cada
+  frase viaja como PCM 16 bits y vuelve el texto. Un VPS de la tailnet sirve
+  igual. Al cerrar la app se apaga.
+- **xAI**: `POST https://api.x.ai/v1/stt`, USD 0,10 la hora. La clave sale de
+  `XAI_API_KEY` en el entorno y solo la lee Rust; la interfaz nunca la ve.
+  Solo manda frases cerradas (sin parciales, para no pagar el mismo audio dos
+  veces), así que el tachado llega al terminar cada frase. Las claves y
+  títulos del guion van como `keyterm` para que acierte nombres y siglas.
+
+Abajo, mientras escucha, se ve qué motor quedó ("Esta PC · DirectML",
+"Otra PC · one", "xAI"). Un error de red se muestra unos segundos y la frase se
+pierde, la escucha sigue.
 
 ## Coach
 

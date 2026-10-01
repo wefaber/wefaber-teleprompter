@@ -32,6 +32,7 @@ import {
 } from "./lib/speech";
 import { useCoaching } from "./useCoaching";
 import { useVoiceCoach } from "./useVoiceCoach";
+import { keytermsOf, type EngineConfig, type EngineMode } from "./lib/engine";
 
 type Panel = null | "outline" | "settings" | "help" | "editor" | "notes";
 
@@ -42,7 +43,8 @@ const devTransport: Transport = async (system, user, maxTokens) => {
   return r.text();
 };
 
-const ENGINE_LABEL = { parakeet: "Parakeet v3, local", navegador: "Reconocimiento del navegador", ninguno: "Ninguno" } as const;
+const ENGINE_LABEL = { parakeet: "Parakeet v3", navegador: "Reconocimiento del navegador", ninguno: "Ninguno" } as const;
+const MODE_LABEL: Record<EngineMode, string> = { auto: "Parakeet v3, automático", local: "Parakeet v3, local", remota: "Parakeet v3, otra PC", xai: "xAI" };
 
 export function App() {
   const [library, setLibrary] = useState<Library>(() => loadLibrary(DEFAULT_SCRIPT));
@@ -61,6 +63,8 @@ export function App() {
   const [speech, setSpeech] = useState<{ state: SpeechState; message?: string }>({ state: "idle" });
   const [level, setLevel] = useState({ level: 0, speaking: false, silent: false });
   const [heard, setHeard] = useState({ final: "", partial: "" });
+  const [engineLabel, setEngineLabel] = useState<{ label: string; note: string | null } | null>(null);
+  const [sttProblem, setSttProblem] = useState<string | null>(null);
 
   const [model, setModel] = useState<ModelInfo | null>(null);
   const [progress, setProgress] = useState<ModelProgress | null>(null);
@@ -240,6 +244,8 @@ export function App() {
       onFinal,
       onState: (state, message) => setSpeech({ state, message }),
       onLevel: (l, speaking, silent) => setLevel({ level: l, speaking, silent }),
+      onEngine: (label, note) => setEngineLabel({ label, note }),
+      onProblem: (message) => setSttProblem(message),
     });
     recognizer.current = r;
     // En desarrollo, `__decir("texto")` en la consola hace de micrófono.
@@ -309,13 +315,29 @@ export function App() {
       void r.stop();
       return;
     }
-    if (r.engine === "parakeet" && model && !model.present) {
+    // Con otra PC o xAI no hace falta el modelo; en automático decide Rust.
+    if (r.engine === "parakeet" && settings.sttMode === "local" && model && !model.present) {
       setPanel("settings");
       setModelError("Primero hay que bajar el modelo.");
       return;
     }
-    void r.start(settings.device);
-  }, [listening, model, settings.device]);
+    const engine: EngineConfig = {
+      mode: settings.sttMode,
+      accel: settings.sttAccel || null,
+      remoteUrl: settings.sttRemoteUrl || null,
+      remoteKey: settings.sttRemoteKey || null,
+      keyterms: keytermsOf(doc),
+    };
+    setSttProblem(null);
+    void r.start(settings.device, engine);
+  }, [listening, model, settings.device, settings.sttMode, settings.sttAccel, settings.sttRemoteUrl, settings.sttRemoteKey, doc]);
+
+  // Un error de red se muestra un rato y se va solo.
+  useEffect(() => {
+    if (!sttProblem) return;
+    const id = setTimeout(() => setSttProblem(null), 8_000);
+    return () => clearTimeout(id);
+  }, [sttProblem]);
 
   const fullscreen = useCallback(async () => {
     try {
@@ -405,6 +427,7 @@ export function App() {
   const style = { "--bg": bg, "--ink": ink, "--scale": settings.textScale } as CSSProperties;
   const showChrome = controls || panel !== null;
   const recognizerEngine = recognizer.current?.engine ?? (inTauri() ? "parakeet" : "navegador");
+  const engineName = recognizerEngine === "parakeet" ? MODE_LABEL[settings.sttMode] : ENGINE_LABEL[recognizerEngine];
 
   const mm = Math.floor(elapsed / 60_000);
   const ss = Math.floor((elapsed % 60_000) / 1000);
@@ -449,7 +472,7 @@ export function App() {
         }`}
       >
         <p className="m-0 font-display text-base font-bold">
-          Apuntador <span className="ml-2 font-body text-xs font-normal text-[var(--muted)]">{ENGINE_LABEL[recognizerEngine]}</span>
+          Apuntador <span className="ml-2 font-body text-xs font-normal text-[var(--muted)]">{engineName}</span>
         </p>
         <nav className="flex items-center gap-1 rounded-full border border-[var(--edge)] bg-[var(--panel)] p-1 shadow-[0_8px_30px_-10px_rgb(0_0_0/0.25)]" aria-label="Controles">
           <IconButton label={listening ? "Pausar (M)" : "Escuchar (M)"} onClick={toggleMic} active={listening}>
@@ -512,6 +535,16 @@ export function App() {
               <span className="flex items-center gap-1" title={`La voz del coach habla por ${voice.output ?? "la salida predeterminada"}`}>
                 <Headphones className="size-3.5" aria-hidden />
                 voz
+              </span>
+            )}
+            {speech.state === "listening" && engineLabel && (
+              <span title={engineLabel.note ?? "Dónde se reconoce la voz"} className={engineLabel.note ? "text-[var(--color-signal)]" : ""}>
+                {engineLabel.label}
+              </span>
+            )}
+            {sttProblem && (
+              <span className="rounded-full border border-[var(--color-signal)] px-2 py-0.5 text-[var(--color-signal)]" role="alert" title={sttProblem}>
+                {sttProblem.length > 60 ? `${sttProblem.slice(0, 60)}…` : sttProblem}
               </span>
             )}
             {speech.state === "listening" && level.silent && (
@@ -602,7 +635,7 @@ export function App() {
           <SettingsPanel
             settings={settings}
             onChange={patch}
-            engine={ENGINE_LABEL[recognizerEngine]}
+            engine={engineName}
             inputs={inputs}
             model={model}
             progress={progress}
@@ -615,6 +648,7 @@ export function App() {
             phone={isPhone ? phone.state : null}
             cameraMode={settings.camera ? cameraMode : null}
             voice={voice}
+            listening={speech.state === "listening"}
           />
         </Drawer>
       )}

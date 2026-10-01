@@ -1,10 +1,12 @@
 mod audio;
+mod engine;
 mod llm;
 mod model;
 mod phone;
 mod prosody;
 mod rec;
 mod segmenter;
+mod share;
 mod stt;
 mod tts;
 
@@ -48,8 +50,63 @@ fn list_inputs() -> Vec<String> {
 }
 
 #[tauri::command(async)]
-fn stt_start(app: AppHandle, stt: State<'_, stt::Stt>, device: Option<String>) -> Result<(), String> {
-    stt.start(app, device)
+fn stt_start(app: AppHandle, stt: State<'_, stt::Stt>, device: Option<String>, engine: Option<engine::EngineConfig>) -> Result<(), String> {
+    stt.start(app, device, engine.unwrap_or_default())
+}
+
+/// Lo que hay en esta PC para reconocer voz: hardware, medición guardada
+/// (si es de esta máquina) y si hay clave de xAI.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct EngineInfo {
+    hardware: engine::Hardware,
+    report: Option<engine::Report>,
+    xai: bool,
+    slow_rtf: f32,
+}
+
+#[tauri::command(async)]
+fn engine_info(app: AppHandle) -> Result<EngineInfo, String> {
+    let hardware = engine::detect();
+    let report = engine::saved_report(&stt::config_dir(&app)?, &hardware);
+    Ok(EngineInfo { hardware, report, xai: engine::xai_key().is_some(), slow_rtf: engine::SLOW_RTF })
+}
+
+/// Mide de nuevo cada acelerador. Tarda unos segundos por cada uno.
+#[tauri::command(async)]
+fn engine_bench(app: AppHandle, stt: State<'_, stt::Stt>) -> Result<Option<engine::Report>, String> {
+    if stt.is_running() {
+        return Err("Pausá la escucha para medir".into());
+    }
+    stt.report(&app, true)
+}
+
+/// Prueba la otra PC antes de usarla.
+#[tauri::command(async)]
+fn engine_remote_check(url: String, key: String) -> Result<engine::RemoteHealth, String> {
+    engine::Remote::new(&url, &key)?.health()
+}
+
+#[tauri::command(async)]
+fn share_info(app: AppHandle, share: State<'_, share::Share>) -> Result<share::ShareInfo, String> {
+    Ok(share.info(&stt::config_dir(&app)?))
+}
+
+/// Compartir el reconocimiento de esta PC con la tailnet, con el mejor acelerador medido.
+#[tauri::command(async)]
+fn share_start(app: AppHandle, share: State<'_, share::Share>, stt: State<'_, stt::Stt>) -> Result<share::ShareInfo, String> {
+    let dir = model::model_dir(&app)?;
+    if !model::is_present(&dir) {
+        return Err("Para compartir, esta PC necesita el modelo bajado".into());
+    }
+    let accel = stt.report(&app, false)?.and_then(|r| r.best).unwrap_or(engine::Accel::Cpu);
+    share.start(&stt::config_dir(&app)?, stt.slot(), dir, accel)
+}
+
+#[tauri::command(async)]
+fn share_stop(app: AppHandle, share: State<'_, share::Share>) -> Result<share::ShareInfo, String> {
+    share.stop();
+    Ok(share.info(&stt::config_dir(&app)?))
 }
 
 #[tauri::command(async)]
@@ -148,6 +205,7 @@ pub fn run() {
         .manage(stt::Stt::default())
         .manage(Downloading::default())
         .manage(rec::Rec::default())
+        .manage(share::Share::default())
         .manage(phone::Phone::start())
         .invoke_handler(tauri::generate_handler![
             model_info,
@@ -165,7 +223,13 @@ pub fn run() {
             phone_info,
             phone_public,
             tts_edge,
-            audio_output
+            audio_output,
+            engine_info,
+            engine_bench,
+            engine_remote_check,
+            share_info,
+            share_start,
+            share_stop
         ])
         .build(tauri::generate_context!())
         .expect("no pude arrancar la app")
@@ -176,6 +240,7 @@ pub fn run() {
                 if phone.is_public() {
                     let _ = phone.set_public(false);
                 }
+                tauri::Manager::state::<share::Share>(app).stop();
             }
         });
 }

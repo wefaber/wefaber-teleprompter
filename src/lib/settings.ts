@@ -3,6 +3,7 @@ import type { PhoneRoute } from "./phone-link";
 import type { Facing } from "./phone-protocol";
 import type { Container } from "./recorder";
 import type { VoiceId, VoiceMode } from "./voice";
+import type { Accel, EngineMode } from "./engine";
 
 /** Valor de cameraDevice para usar el iPhone por la red en vez de una webcam. */
 export const PHONE_CAMERA = "iphone";
@@ -63,6 +64,13 @@ export type Settings = {
   /** La voz del coach por los auriculares. */
   voiceMode: VoiceMode;
   voice: VoiceId;
+  /** Dónde se reconoce la voz: esta PC, otra de la tailnet o xAI. */
+  sttMode: EngineMode;
+  /** Forzar un acelerador en esta PC; vacío usa el de la medición. */
+  sttAccel: Accel | "";
+  /** La otra PC: https://pc.tailnet.ts.net:5191 y su clave. */
+  sttRemoteUrl: string;
+  sttRemoteKey: string;
 };
 
 export type Corner = "abajo-der" | "abajo-izq" | "arriba-der" | "arriba-izq";
@@ -97,6 +105,10 @@ export const DEFAULTS: Settings = {
   phoneRoute: "temporal",
   voiceMode: "auriculares",
   voice: "edge:es-AR-TomasNeural",
+  sttMode: "auto",
+  sttAccel: "",
+  sttRemoteUrl: "",
+  sttRemoteKey: "",
 };
 
 const KEY = "apuntador:ajustes";
