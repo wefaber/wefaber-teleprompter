@@ -1,0 +1,8 @@
+node_modules
+dist
+dist-phone
+*.log
+*.local
+.DS_Store
+src-tauri/target
+src-tauri/gen

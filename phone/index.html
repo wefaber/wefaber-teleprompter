@@ -1,0 +1,267 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
+    <meta name="theme-color" content="#000000" />
+    <title>Apuntador · cámara</title>
+    <style>
+      :root {
+        --ink: #f4f1ea;
+        --muted: rgb(244 241 234 / 0.62);
+        --signal: #e4572e;
+        --edge: rgb(244 241 234 / 0.28);
+        color-scheme: dark;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        background: #000;
+        color: var(--ink);
+        font-family: -apple-system, "SF Pro Text", system-ui, sans-serif;
+        -webkit-font-smoothing: antialiased;
+        overflow: hidden;
+        -webkit-user-select: none;
+        user-select: none;
+      }
+      video {
+        position: fixed;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        object-fit: contain;
+        background: #000;
+      }
+      /* Con la frontal se lee el guion: la imagen propia queda chica, abajo. */
+      body.user video {
+        inset: auto 16px calc(16px + env(safe-area-inset-bottom) + 64px) auto;
+        width: 28vw;
+        height: auto;
+        aspect-ratio: 9 / 16;
+        object-fit: cover;
+        border-radius: 14px;
+        border: 1px solid var(--edge);
+        transform: scaleX(-1);
+      }
+      #script {
+        display: none;
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: calc(env(safe-area-inset-bottom) + 72px);
+        overflow: hidden;
+        padding: calc(env(safe-area-inset-top) + 18px) 22px 0;
+      }
+      body.user #script {
+        display: block;
+      }
+      /* Con la frontal la pantalla es una luz más: el color de la luz de la PC. */
+      html:has(body.user),
+      body.user {
+        background: var(--light, #fff);
+      }
+      body.user {
+        --ink: #16130f;
+        --muted: rgb(22 19 15 / 0.6);
+        --edge: rgb(22 19 15 / 0.22);
+        --chip: rgb(22 19 15 / 0.07);
+        color: var(--ink);
+      }
+      body.user #bar {
+        background: rgb(255 255 255 / 0.55);
+      }
+      #top {
+        display: flex;
+        align-items: baseline;
+        gap: 10px;
+        margin: 0 0 8px;
+      }
+      #top #section {
+        flex: 1;
+        min-width: 0;
+        margin: 0;
+      }
+      #clock {
+        font-size: 22px;
+        font-weight: 600;
+        font-variant-numeric: tabular-nums;
+      }
+      #clock.paused {
+        color: var(--muted);
+      }
+      #rec {
+        color: var(--signal);
+        font-size: 14px;
+        font-weight: 700;
+        font-variant-numeric: tabular-nums;
+      }
+      #rec[hidden] {
+        display: none;
+      }
+      #section {
+        margin: 0 0 8px;
+        font-size: 13px;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        color: var(--muted);
+      }
+      #title {
+        margin: 0 0 14px;
+        font-size: clamp(26px, 8vw, 40px);
+        line-height: 1.05;
+        font-weight: 700;
+        text-wrap: balance;
+      }
+      #bullets {
+        margin: 0;
+        padding: 0;
+        list-style: none;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        font-size: clamp(18px, 5.4vw, 26px);
+        line-height: 1.2;
+      }
+      #bullets li.done {
+        opacity: 0.35;
+      }
+      /* Como el "Después" de la PC: debajo de una línea, más apagado. */
+      #next {
+        margin: 18px 0 0;
+        padding-top: 14px;
+        border-top: 1px solid var(--edge);
+        color: var(--muted);
+      }
+      #next[hidden] {
+        display: none;
+      }
+      #next-label {
+        margin: 0 0 6px;
+        font-size: 12px;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+      }
+      #next-title {
+        margin: 0 0 8px;
+        font-size: clamp(19px, 5.6vw, 26px);
+        line-height: 1.1;
+        font-weight: 600;
+        text-wrap: balance;
+      }
+      #next-bullets {
+        margin: 0;
+        padding: 0 0 0 1.1em;
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        font-size: clamp(15px, 4.4vw, 19px);
+        line-height: 1.25;
+      }
+      #bar {
+        position: fixed;
+        left: 12px;
+        right: 12px;
+        bottom: calc(env(safe-area-inset-bottom) + 12px);
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 8px 8px 8px 14px;
+        border: 1px solid var(--edge);
+        border-radius: 999px;
+        background: rgb(0 0 0 / 0.55);
+        -webkit-backdrop-filter: blur(12px);
+        backdrop-filter: blur(12px);
+        font-size: 14px;
+      }
+      #dot {
+        width: 9px;
+        height: 9px;
+        border-radius: 50%;
+        background: var(--muted);
+        flex: none;
+      }
+      #dot.on {
+        background: #3ecf6e;
+      }
+      #status {
+        flex: 1;
+        min-width: 0;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      button {
+        font: inherit;
+        color: var(--ink);
+        background: var(--chip, rgb(244 241 234 / 0.14));
+        border: 1px solid var(--edge);
+        border-radius: 999px;
+        padding: 8px 14px;
+      }
+      #start {
+        position: fixed;
+        inset: 0;
+        display: grid;
+        place-items: center;
+        text-align: center;
+        padding: 32px;
+        background: #000;
+        z-index: 2;
+      }
+      #start h1 {
+        margin: 0 0 8px;
+        font-size: 28px;
+      }
+      #start p {
+        margin: 0 0 24px;
+        color: var(--muted);
+        line-height: 1.4;
+      }
+      #start button {
+        font-size: 18px;
+        padding: 14px 26px;
+        background: var(--ink);
+        color: #000;
+      }
+    </style>
+  </head>
+  <body>
+    <video id="video" playsinline muted autoplay></video>
+
+    <section id="script" aria-live="polite">
+      <div id="top">
+        <p id="section"></p>
+        <span id="rec" hidden></span>
+        <span id="clock" aria-label="Tiempo de la toma">00:00</span>
+      </div>
+      <h1 id="title"></h1>
+      <ul id="bullets"></ul>
+      <section id="next" aria-label="Lo que sigue" hidden>
+        <p id="next-label"></p>
+        <p id="next-title"></p>
+        <ul id="next-bullets"></ul>
+      </section>
+    </section>
+
+    <div id="bar">
+      <span id="dot" aria-hidden="true"></span>
+      <span id="status">Sin conectar</span>
+      <button id="flip" type="button">Cambiar cámara</button>
+    </div>
+
+    <div id="start">
+      <div>
+        <h1>Apuntador</h1>
+        <p>El iPhone hace de cámara y la vista previa se ve en la PC. Desactivá el bloqueo automático mientras grabás.</p>
+        <button id="go" type="button">Conectar la cámara</button>
+      </div>
+    </div>
+
+    <script src="/telefono/app.js"></script>
+  </body>
+</html>

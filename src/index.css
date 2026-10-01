@@ -1,0 +1,165 @@
+@import "tailwindcss";
+
+/* Apuntador: la pantalla entera es una luz de relleno; el texto es poco,
+   grande y oscuro, para leerlo de reojo a un metro y medio. */
+@theme {
+  --font-display: "Bricolage Grotesque", ui-sans-serif, system-ui, sans-serif;
+  --font-body: "Atkinson Hyperlegible Next", "Segoe UI", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "Cascadia Mono", monospace;
+  --color-signal: #e4572e;
+  --color-note: #a3530d;
+}
+
+:root {
+  /* Los pisa App según la luz elegida. */
+  --bg: #ffffff;
+  --ink: #1a1813;
+  --muted: color-mix(in oklab, var(--ink) 52%, var(--bg));
+  --faint: color-mix(in oklab, var(--ink) 16%, var(--bg));
+  --panel: color-mix(in oklab, var(--ink) 4%, var(--bg));
+  /* Borde de lo que se toca o se lee aparte (paneles, campos): al menos 3:1
+     contra el fondo, para ver dónde termina cada cosa. */
+  --edge: color-mix(in oklab, var(--ink) 48%, var(--bg));
+  --scale: 1;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-body);
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+}
+
+.title {
+  font-family: var(--font-display);
+  font-size: calc(clamp(2.4rem, 4.6vw, 5.4rem) * var(--scale));
+  font-weight: 700;
+  line-height: 1.02;
+  letter-spacing: -0.02em;
+  text-wrap: balance;
+  font-variation-settings: "opsz" 96;
+}
+
+.bullet {
+  font-size: calc(clamp(1.3rem, 2.3vw, 2.6rem) * var(--scale));
+  line-height: 1.22;
+  text-wrap: pretty;
+}
+
+.note {
+  font-size: calc(clamp(1rem, 1.5vw, 1.6rem) * var(--scale));
+}
+
+/* Lo que sigue: se lee de reojo, sin competir con el punto actual. */
+.next-title {
+  font-family: var(--font-display);
+  font-size: calc(clamp(1.3rem, 2.2vw, 2.4rem) * var(--scale));
+  font-weight: 600;
+  line-height: 1.1;
+  text-wrap: balance;
+}
+
+.next-bullet {
+  font-size: calc(clamp(0.95rem, 1.4vw, 1.5rem) * var(--scale));
+  line-height: 1.25;
+  text-wrap: pretty;
+}
+
+.eyebrow {
+  font-size: calc(clamp(0.8rem, 1.05vw, 1.1rem) * var(--scale));
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+@keyframes enter {
+  from {
+    opacity: 0;
+    transform: translateY(0.6rem);
+  }
+}
+
+.enter {
+  animation: enter 380ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+
+@keyframes pulse-dot {
+  50% {
+    transform: scale(1.35);
+    opacity: 0.6;
+  }
+}
+
+.live {
+  animation: pulse-dot 1.4s ease-in-out infinite;
+}
+
+/* Paneles que flotan: separados del borde, con contorno claro y sombra. */
+.island {
+  border: 1px solid var(--edge);
+  border-radius: 1.25rem;
+  background: var(--panel);
+  box-shadow:
+    0 1px 2px rgb(0 0 0 / 0.08),
+    0 18px 50px -12px rgb(0 0 0 / 0.28);
+  animation: island-in 260ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+
+@keyframes island-in {
+  from {
+    opacity: 0;
+    transform: translateX(0.75rem);
+  }
+}
+
+/* Scroll fino, del color del borde, que no toca las esquinas redondeadas. */
+.scroll {
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in oklab, var(--ink) 30%, transparent) transparent;
+  scrollbar-gutter: stable;
+}
+
+.scroll::-webkit-scrollbar {
+  width: 10px;
+}
+
+.scroll::-webkit-scrollbar-track {
+  background: transparent;
+  margin-block: 0.75rem;
+}
+
+.scroll::-webkit-scrollbar-thumb {
+  background: color-mix(in oklab, var(--ink) 28%, transparent);
+  background-clip: padding-box;
+  border: 3px solid transparent;
+  border-radius: 999px;
+}
+
+.scroll::-webkit-scrollbar-thumb:hover {
+  background-color: color-mix(in oklab, var(--ink) 50%, transparent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .enter,
+  .live,
+  .island {
+    animation: none;
+  }
+}
+
+:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+}
+
+input[type="range"] {
+  accent-color: var(--ink);
+}
