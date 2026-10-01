@@ -6,6 +6,7 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import { PHONE_PORT, parse, type Facing, type PhoneScript, type ToPc, type ToPhone } from "./phone-protocol";
+import type { UploadResult } from "./phone-take";
 
 export type PhoneInfo = {
   token: string;
@@ -30,9 +31,16 @@ export type LinkState = {
   /** Lo que da la cámara del teléfono, no la vista previa: "3840x2160". */
   size: string | null;
   error: string | null;
+  /** La toma que graba el teléfono: lo que ya llegó y los segundos que faltan. */
+  upload: { sentBytes: number; pending: number } | null;
 };
 
-export const IDLE: LinkState = { server: false, phone: false, video: false, facing: null, size: null, error: null };
+export const IDLE: LinkState = { server: false, phone: false, video: false, facing: null, size: null, error: null, upload: null };
+
+/** Cuánto esperar a que el teléfono diga que arrancó a grabar. */
+const START_TIMEOUT = 20_000;
+
+type Waiter<T> = { resolve: (v: T) => void; reject: (e: Error) => void };
 
 export function phoneInfo(): Promise<PhoneInfo> {
   return invoke<PhoneInfo>("phone_info");
@@ -65,6 +73,10 @@ export class PhoneLink {
   private state: LinkState = { ...IDLE };
   private stopped = false;
   private retry: ReturnType<typeof setTimeout> | undefined;
+  private starting = new Map<string, Waiter<{ mime: string; warning: string | null }>>();
+  private stopping = new Map<string, Waiter<UploadResult>>();
+  /** Tomas que el teléfono terminó solo (se cortó), hasta que la PC las cierre. */
+  private ended = new Map<string, UploadResult>();
 
   constructor(token: string, h: Handlers) {
     this.token = token;
@@ -93,6 +105,7 @@ export class PhoneLink {
     ws.onclose = () => {
       if (this.ws !== ws) return;
       this.closePeer();
+      this.failTakes("Se cortó el servidor del iPhone");
       this.set({ server: false, phone: false, video: false });
       if (!this.stopped) this.retry = setTimeout(() => this.connect(), 1_500);
     };
@@ -109,8 +122,32 @@ export class PhoneLink {
     switch (msg.type) {
       case "peer":
         this.set({ phone: msg.connected, ...(msg.connected ? {} : { video: false }) });
-        if (!msg.connected) this.closePeer();
+        if (!msg.connected) {
+          this.closePeer();
+          this.failTakes("El iPhone se desconectó");
+        }
         break;
+      case "recording": {
+        const w = this.starting.get(msg.take);
+        this.starting.delete(msg.take);
+        if (msg.mime) {
+          this.set({ upload: { sentBytes: 0, pending: 0 } });
+          w?.resolve({ mime: msg.mime, warning: msg.error });
+        } else w?.reject(new Error(msg.error ?? "El iPhone no pudo grabar"));
+        break;
+      }
+      case "upload":
+        this.set({ upload: { sentBytes: msg.sentBytes, pending: msg.pending } });
+        break;
+      case "recorded": {
+        const result = { chunks: msg.chunks, bytes: msg.bytes, error: msg.error };
+        const w = this.stopping.get(msg.take);
+        this.stopping.delete(msg.take);
+        this.set({ upload: null });
+        if (w) w.resolve(result);
+        else this.ended.set(msg.take, result);
+        break;
+      }
       case "hello":
         break;
       case "status":
@@ -176,6 +213,43 @@ export class PhoneLink {
     this.send({ type: "light", color });
   }
 
+  /** Que el teléfono grabe a calidad completa; resuelve con el formato. */
+  startTake(take: string, bitrate: number): Promise<{ mime: string; warning: string | null }> {
+    if (!this.state.phone) return Promise.reject(new Error("El iPhone no está conectado"));
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.starting.delete(take);
+        reject(new Error("El iPhone no contestó"));
+      }, START_TIMEOUT);
+      this.starting.set(take, {
+        resolve: (v) => (clearTimeout(timer), resolve(v)),
+        reject: (e) => (clearTimeout(timer), reject(e)),
+      });
+      this.send({ type: "record", take, bitrate });
+    });
+  }
+
+  /** Termina la toma y espera a que el teléfono suba todo. */
+  stopTake(take: string): Promise<UploadResult> {
+    const done = this.ended.get(take);
+    if (done) {
+      this.ended.delete(take);
+      return Promise.resolve(done);
+    }
+    if (!this.state.phone) return Promise.reject(new Error("El iPhone se desconectó"));
+    return new Promise((resolve, reject) => {
+      this.stopping.set(take, { resolve, reject });
+      this.send({ type: "record-stop", take });
+    });
+  }
+
+  private failTakes(message: string) {
+    for (const w of [...this.starting.values(), ...this.stopping.values()]) w.reject(new Error(message));
+    this.starting.clear();
+    this.stopping.clear();
+    if (this.state.upload) this.set({ upload: null });
+  }
+
   /** La imagen se colgó: que el teléfono vuelva a ofrecer. */
   restart() {
     this.send({ type: "restart" });
@@ -183,6 +257,7 @@ export class PhoneLink {
 
   stop() {
     this.stopped = true;
+    this.failTakes("Se cerró la cámara del iPhone");
     clearTimeout(this.retry);
     this.closePeer();
     this.ws?.close();

@@ -8,6 +8,7 @@ mod rec;
 mod segmenter;
 mod share;
 mod stt;
+mod take;
 mod tts;
 
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -141,6 +142,18 @@ fn phone_public(phone: State<'_, phone::Phone>, on: bool) -> Result<phone::Info,
     Ok(phone.info())
 }
 
+/// Prepara la toma del iPhone: llega en pedazos por POST /rec y va a la
+/// carpeta de tomas como `base.mp4`.
+#[tauri::command(async)]
+fn phone_take_begin(app: AppHandle, phone: State<'_, phone::Phone>, take: String, base: String) -> Result<(), String> {
+    phone.take_begin(&take, &rec::folder(&app)?, &base)
+}
+
+#[tauri::command(async)]
+fn phone_take_end(phone: State<'_, phone::Phone>, take: String) -> Result<rec::Saved, String> {
+    phone.take_end(&take)
+}
+
 /// Una frase del coach en MP3 (base64, por lo mismo que `rec_write`).
 #[tauri::command]
 async fn tts_edge(text: String, voice: String, rate: Option<i32>) -> Result<String, String> {
@@ -222,6 +235,8 @@ pub fn run() {
             rec_reveal,
             phone_info,
             phone_public,
+            phone_take_begin,
+            phone_take_end,
             tts_edge,
             audio_output,
             engine_info,

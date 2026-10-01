@@ -36,7 +36,7 @@ pub fn folder(app: &AppHandle) -> Result<PathBuf, String> {
 }
 
 /// Solo letras, números, guiones y un punto: el nombre lo arma la interfaz.
-fn safe_name(name: &str) -> Result<&str, String> {
+pub(crate) fn safe_name(name: &str) -> Result<&str, String> {
     let ok = !name.is_empty()
         && name.len() <= 80
         && !name.starts_with('.')

@@ -34,6 +34,11 @@ export function describeFormat(mime: string): string {
   return `${video} + ${audio}`;
 }
 
+/** toma-2026-09-30_12-04-05-iphone: la del iPhone, sin extensión (la pone el teléfono). */
+export function phoneTakeBase(date: Date): string {
+  return takeName(date, "x").replace(/\.x$/, "-iphone");
+}
+
 /** toma-2026-09-30_12-04-05.mkv, en hora local. */
 export function takeName(date: Date, ext: string): string {
   const p = (n: number) => String(n).padStart(2, "0");
@@ -124,6 +129,8 @@ export type RecordOptions = {
   bitrate: number;
   tauri: boolean;
   onError: (message: string) => void;
+  /** La hora del nombre del archivo, para que coincida con la del iPhone. */
+  date?: Date;
 };
 
 export class Recording {
@@ -158,7 +165,7 @@ export class Recording {
       videoBitsPerSecond: o.bitrate,
       audioBitsPerSecond: 320_000,
     });
-    const name = takeName(new Date(), format.ext);
+    const name = takeName(o.date ?? new Date(), format.ext);
     const { sink, path } = o.tauri ? await tauriSink(name) : browserSink(name, format.mime);
     const rec = new Recording(recorder, sink, path, format.mime);
     rec.mic = o.audio;

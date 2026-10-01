@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { describeFormat, pickFormat, takeName, toBase64 } from "./recorder";
+import { describeFormat, phoneTakeBase, pickFormat, takeName, toBase64 } from "./recorder";
 
 describe("pickFormat", () => {
   const all = () => true;
@@ -34,4 +34,10 @@ test("takeName usa la hora local y un nombre que Rust acepta", () => {
   const name = takeName(new Date(2026, 8, 30, 9, 5, 7), "mkv");
   expect(name).toBe("toma-2026-09-30_09-05-07.mkv");
   expect(name).toMatch(/^[A-Za-z0-9_.-]+$/);
+});
+
+test("la toma del iPhone se llama como la de la PC", () => {
+  const at = new Date(2026, 8, 30, 9, 5, 7);
+  expect(phoneTakeBase(at)).toBe("toma-2026-09-30_09-05-07-iphone");
+  expect(takeName(at, "mkv").startsWith(phoneTakeBase(at).replace("-iphone", ""))).toBe(true);
 });

@@ -9,6 +9,13 @@
  * Orden: el teléfono abre la cámara y manda `offer`; la PC contesta
  * `answer`; los dos se pasan `ice`. Cambiar de cámara no rearma la
  * conexión: el teléfono reemplaza la pista de video.
+ *
+ * Grabar: la PC manda `record`; el teléfono graba la cámara a resolución
+ * completa con su micrófono, contesta `recording` y sube la toma en pedazos
+ * de un segundo por POST /rec?t=…&take=…&seq=…&ext=… (204 escrito, 404 la
+ * toma ya no existe, 409 {expected} falta uno anterior). Avisa cómo va con
+ * `upload`. Con `record-stop` termina, sube lo que falte y manda
+ * `recorded`. Mientras graba no cambia de cámara.
  */
 
 export type Facing = "environment" | "user";
@@ -46,14 +53,23 @@ export type ToPhone =
   /** Con la frontal la pantalla del teléfono suma luz: este color. */
   | { type: "light"; color: string }
   /** La PC perdió la imagen: que el teléfono vuelva a ofrecer. */
-  | { type: "restart" };
+  | { type: "restart" }
+  /** Empezar a grabar en el teléfono. `take`: solo letras y números. */
+  | { type: "record"; take: string; bitrate: number }
+  | { type: "record-stop"; take: string };
 
 export type ToPc =
   | PeerMessage
   | { type: "hello"; device: string }
   | { type: "offer"; sdp: string }
   | { type: "ice"; candidate: RTCIceCandidateInit | null }
-  | { type: "status"; facing: Facing; width: number; height: number; error: string | null };
+  | { type: "status"; facing: Facing; width: number; height: number; error: string | null }
+  /** Arrancó (con el formato) o no pudo. */
+  | { type: "recording"; take: string; mime: string | null; error: string | null }
+  /** Lo subido hasta ahora y los pedazos que esperan. */
+  | { type: "upload"; take: string; sentBytes: number; pending: number }
+  /** Terminó de subir todo, o hasta donde pudo. */
+  | { type: "recorded"; take: string; chunks: number; bytes: number; error: string | null };
 
 export const PHONE_PORT = 5190;
 
