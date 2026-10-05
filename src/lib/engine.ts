@@ -50,6 +50,12 @@ export function keytermsOf(doc: Doc): string[] {
 }
 
 /** "0,03×" → cuánto tarda por segundo de audio, y si alcanza para ir en vivo. */
+/** Lo que da "Copiar" en Compartir esta PC: la dirección y la clave, una por línea. */
+export function splitShare(text: string): { url: string; key: string } | null {
+  const [url, key, ...rest] = text.split(/\s+/).filter(Boolean);
+  return url && key && rest.length === 0 ? { url, key } : null;
+}
+
 export function speed(rtf: number | null, slow: number): string {
   if (rtf === null) return "no anduvo";
   const times = Math.max(1, Math.round(1 / rtf));

@@ -8,6 +8,7 @@ import {
   shareStart,
   shareStop,
   speed,
+  splitShare,
   type Accel,
   type EngineInfo,
   type EngineMode,
@@ -55,6 +56,16 @@ export function EngineSettings({ settings, onChange, modelPresent, listening }: 
     } finally {
       setBusy(null);
     }
+  };
+
+  // Lo que copia "Copiar" trae dirección y clave: al pegar en cualquiera de los
+  // dos campos, cada una va a su lugar.
+  const pasteShare = (e: React.ClipboardEvent) => {
+    const both = splitShare(e.clipboardData.getData("text"));
+    if (!both) return;
+    e.preventDefault();
+    setCheck(null);
+    onChange({ sttRemoteUrl: both.url, sttRemoteKey: both.key });
   };
 
   const hw = info?.hardware;
@@ -147,6 +158,7 @@ export function EngineSettings({ settings, onChange, modelPresent, listening }: 
             aria-label="Dirección de la otra PC"
             placeholder="https://pc.tailnet.ts.net:5191"
             value={settings.sttRemoteUrl}
+            onPaste={pasteShare}
             onChange={(e) => {
               setCheck(null);
               onChange({ sttRemoteUrl: e.target.value.trim() });
@@ -158,6 +170,7 @@ export function EngineSettings({ settings, onChange, modelPresent, listening }: 
             placeholder="Clave"
             type="password"
             value={settings.sttRemoteKey}
+            onPaste={pasteShare}
             onChange={(e) => {
               setCheck(null);
               onChange({ sttRemoteKey: e.target.value.trim() });
