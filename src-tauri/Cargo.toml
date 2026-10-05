@@ -18,7 +18,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 cpal = "0.16"
 transcribe-rs = { version = "0.3.11", features = ["onnx"] }
-reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "multipart", "rustls-tls"] }
 base64 = "0.22"
 axum = { version = "0.8", features = ["ws"] }
 tokio = { version = "1", features = ["net", "sync", "rt", "macros", "time"] }
@@ -29,6 +29,10 @@ sha2 = "0.10"
 flate2 = "1"
 tar = "0.4"
 log = "0.4"
+
+[target.'cfg(windows)'.dependencies]
+# DirectML: cualquier GPU de Windows (NVIDIA, AMD, Intel) sin CUDA.
+transcribe-rs = { version = "0.3.11", features = ["onnx", "ort-directml"] }
 
 [profile.dev.package."*"]
 # La inferencia en debug es inusable; las dependencias van optimizadas siempre.

@@ -219,6 +219,17 @@ mod tests {
         assert_eq!(audio_part(&[0, 5, b'x']), None);
     }
 
+    /// Rehace el audio de la medición (`assets/bench-es.pcm`):
+    /// `cargo test --lib make_bench_clip -- --ignored`, y después
+    /// `ffmpeg -i target/bench-es.mp3 -ac 1 -ar 16000 -f s16le assets/bench-es.pcm`.
+    #[tokio::test]
+    #[ignore]
+    async fn make_bench_clip() {
+        let text = "Hoy les quiero mostrar cómo preparar una entrevista de trabajo con inteligencia artificial, paso a paso y sin perder tiempo.";
+        let mp3 = edge(text, "es-AR-TomasNeural", 0).await.unwrap();
+        std::fs::write(concat!(env!("CARGO_MANIFEST_DIR"), "/target/bench-es.mp3"), mp3).unwrap();
+    }
+
     /// `cargo test --lib real_output -- --ignored --nocapture`
     #[test]
     #[ignore]

@@ -7,6 +7,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type { Prosody } from "./coach";
+import type { EngineConfig } from "./engine";
 import type { Transport } from "./llm";
 
 export type SpeechState = "idle" | "loading" | "listening" | "error" | "unavailable";
@@ -18,6 +19,10 @@ export type SpeechHandlers = {
   onState: (state: SpeechState, message?: string) => void;
   /** silent: el micrófono manda silencio absoluto (muteado o sin ganancia). */
   onLevel: (level: number, speaking: boolean, silent: boolean) => void;
+  /** Qué motor quedó andando ("Esta PC · DirectML", "Otra PC · one", "xAI"). */
+  onEngine?: (label: string, note: string | null) => void;
+  /** Un pedido que falló (sobre todo de red, con otra PC o xAI). */
+  onProblem?: (message: string) => void;
 };
 
 export type ModelInfo = { present: boolean; path: string; name: string };
@@ -25,7 +30,7 @@ export type ModelProgress = { downloaded: number; total: number | null; stage: "
 
 export interface Recognizer {
   readonly engine: "parakeet" | "navegador" | "ninguno";
-  start(device?: string): Promise<void>;
+  start(device?: string, engine?: EngineConfig): Promise<void>;
   stop(): Promise<void>;
   dispose(): void;
 }
@@ -85,6 +90,8 @@ class ParakeetRecognizer implements Recognizer {
       listen<{ level: number; speaking: boolean; silent?: boolean }>("stt://level", (e) =>
         h.onLevel(e.payload.level, e.payload.speaking, e.payload.silent ?? false),
       ),
+      listen<{ label: string; note: string | null }>("stt://engine", (e) => h.onEngine?.(e.payload.label, e.payload.note)),
+      listen<string>("stt://problem", (e) => h.onProblem?.(e.payload)),
       listen<{ state: string; message: string | null }>("stt://status", (e) => {
         const map: Record<string, SpeechState> = {
           loading: "loading",
@@ -97,11 +104,11 @@ class ParakeetRecognizer implements Recognizer {
     ]);
   }
 
-  async start(device?: string) {
+  async start(device?: string, engine?: EngineConfig) {
     await this.unlisten;
     this.h.onState("loading");
     try {
-      await invoke("stt_start", { device: device || null });
+      await invoke("stt_start", { device: device || null, engine: engine ?? null });
     } catch (e) {
       this.h.onState("error", String(e));
     }
