@@ -33,7 +33,10 @@ jobs:
         with:
           workspaces: src-tauri
 
+      # Las releases del repo son inmutables: se crea en borrador, se suben los
+      # archivos y recién ahí se publica.
       - uses: tauri-apps/tauri-action@v0
+        id: tauri
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
@@ -43,6 +46,12 @@ jobs:
           tagName: ${{ github.ref_name }}
           releaseName: Apuntador ${{ github.ref_name }}
           releaseBody: Instalador de Windows. Las apps ya instaladas se actualizan solas desde Ajustes → Actualizaciones.
-          releaseDraft: false
+          releaseDraft: true
           prerelease: false
           uploadUpdaterJson: true
+
+      - name: Publicar la release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh api -X PATCH "repos/${GITHUB_REPOSITORY}/releases/${{ steps.tauri.outputs.releaseId }}" -F draft=false

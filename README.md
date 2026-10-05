@@ -371,7 +371,7 @@ que lee `latest.json` de la última Release de GitHub).
 
 Publicar una versión:
 
-1. Subir la versión en `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml` y
+1. Subir la versión (nunca reusar un tag: las releases son inmutables) en `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml` y
    `package.json`.
 2. Mergear a `main` y crear el tag: `git tag vX.Y.Z && git push origin vX.Y.Z`.
 3. `.github/workflows/release.yml` arma el instalador, lo firma y publica la
