@@ -1,5 +1,6 @@
 import { Group, Range, Segmented, Toggle } from "./controls";
 import { EngineSettings } from "./EngineSettings";
+import { Updates } from "./Updates";
 import { Download, X } from "lucide-react";
 import type { ReactNode } from "react";
 import { ASPECTS, CAPTURE_MODES, type Aspect, type Rotation } from "../lib/camera";
@@ -514,6 +515,10 @@ export function SettingsPanel({ settings, onChange, engine, inputs, model, progr
           </div>
         )}
         {model && <EngineSettings settings={settings} onChange={onChange} modelPresent={model.present} listening={listening} />}
+      </Group>
+
+      <Group label="Actualizaciones">
+        <Updates />
       </Group>
     </div>
   );

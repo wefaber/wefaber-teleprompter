@@ -29,13 +29,74 @@ const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 const field = "rounded-md border border-[var(--edge)] bg-[var(--bg)] px-2 py-1.5 font-mono text-xs";
 const button = "rounded-md border border-[var(--edge)] px-3 py-1.5 text-sm hover:bg-[var(--faint)] disabled:opacity-40";
 
+/** Dirección y clave de la otra PC, y probar que contesta. */
+function RemoteFields({ settings, onChange, optional }: { settings: Settings; onChange: Props["onChange"]; optional: boolean }) {
+  const [testing, setTesting] = useState(false);
+  const [result, setResult] = useState<{ text: string; failed: boolean } | null>(null);
+
+  // Lo que copia "Copiar" trae dirección y clave: al pegar en cualquiera de los
+  // dos campos, cada una va a su lugar.
+  const pasteShare = (e: React.ClipboardEvent) => {
+    const both = splitShare(e.clipboardData.getData("text"));
+    if (!both) return;
+    e.preventDefault();
+    setResult(null);
+    onChange({ sttRemoteUrl: both.url, sttRemoteKey: both.key });
+  };
+
+  const test = async () => {
+    setResult(null);
+    setTesting(true);
+    try {
+      const h = await remoteCheck(settings.sttRemoteUrl, settings.sttRemoteKey);
+      setResult({ text: `Anda: ${h.name}${h.accel ? ` con ${ACCEL_LABEL[h.accel]}` : ""}.`, failed: false });
+    } catch (e) {
+      setResult({ text: message(e), failed: true });
+    } finally {
+      setTesting(false);
+    }
+  };
+
+  return (
+    <div className="flex flex-col gap-2">
+      <span>Otra PC {optional && <span className="text-xs text-[var(--muted)]">(opcional)</span>}</span>
+      <input
+        aria-label="Dirección de la otra PC"
+        placeholder="https://pc.tailnet.ts.net:5191"
+        value={settings.sttRemoteUrl}
+        onPaste={pasteShare}
+        onChange={(e) => {
+          setResult(null);
+          onChange({ sttRemoteUrl: e.target.value.trim() });
+        }}
+        className={field}
+      />
+      <input
+        aria-label="Clave de la otra PC"
+        placeholder="Clave"
+        type="password"
+        value={settings.sttRemoteKey}
+        onPaste={pasteShare}
+        onChange={(e) => {
+          setResult(null);
+          onChange({ sttRemoteKey: e.target.value.trim() });
+        }}
+        className={field}
+      />
+      <button type="button" className={`${button} self-start`} disabled={testing || !settings.sttRemoteUrl} onClick={() => void test()}>
+        {testing ? "Probando…" : "Probar"}
+      </button>
+      {result && <p className={`m-0 text-xs${result.failed ? " text-[var(--color-signal)]" : ""}`}>{result.text}</p>}
+    </div>
+  );
+}
+
 /** Dónde se reconoce la voz: esta PC (y con qué), otra de la tailnet o xAI. */
 export function EngineSettings({ settings, onChange, modelPresent, listening }: Props) {
   const [info, setInfo] = useState<EngineInfo | null>(null);
-  const [busy, setBusy] = useState<"medir" | "compartir" | "probar" | null>(null);
+  const [busy, setBusy] = useState<"medir" | "compartir" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [share, setShare] = useState<ShareInfo | null>(null);
-  const [check, setCheck] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
 
   useEffect(() => {
@@ -56,16 +117,6 @@ export function EngineSettings({ settings, onChange, modelPresent, listening }: 
     } finally {
       setBusy(null);
     }
-  };
-
-  // Lo que copia "Copiar" trae dirección y clave: al pegar en cualquiera de los
-  // dos campos, cada una va a su lugar.
-  const pasteShare = (e: React.ClipboardEvent) => {
-    const both = splitShare(e.clipboardData.getData("text"));
-    if (!both) return;
-    e.preventDefault();
-    setCheck(null);
-    onChange({ sttRemoteUrl: both.url, sttRemoteKey: both.key });
   };
 
   const hw = info?.hardware;
@@ -152,48 +203,7 @@ export function EngineSettings({ settings, onChange, modelPresent, listening }: 
       )}
 
       {(settings.sttMode === "remota" || settings.sttMode === "auto") && (
-        <div className="flex flex-col gap-2">
-          <span>Otra PC {settings.sttMode === "auto" && <span className="text-xs text-[var(--muted)]">(opcional)</span>}</span>
-          <input
-            aria-label="Dirección de la otra PC"
-            placeholder="https://pc.tailnet.ts.net:5191"
-            value={settings.sttRemoteUrl}
-            onPaste={pasteShare}
-            onChange={(e) => {
-              setCheck(null);
-              onChange({ sttRemoteUrl: e.target.value.trim() });
-            }}
-            className={field}
-          />
-          <input
-            aria-label="Clave de la otra PC"
-            placeholder="Clave"
-            type="password"
-            value={settings.sttRemoteKey}
-            onPaste={pasteShare}
-            onChange={(e) => {
-              setCheck(null);
-              onChange({ sttRemoteKey: e.target.value.trim() });
-            }}
-            className={field}
-          />
-          <button
-            type="button"
-            className={`${button} self-start`}
-            disabled={busy !== null || !settings.sttRemoteUrl}
-            onClick={() => {
-              setCheck(null);
-              void run(
-                "probar",
-                () => remoteCheck(settings.sttRemoteUrl, settings.sttRemoteKey),
-                (h) => setCheck(`Anda: ${h.name}${h.accel ? ` con ${ACCEL_LABEL[h.accel]}` : ""}.`),
-              );
-            }}
-          >
-            {busy === "probar" ? "Probando…" : "Probar"}
-          </button>
-          {check && <p className="m-0 text-xs">{check}</p>}
-        </div>
+        <RemoteFields settings={settings} onChange={onChange} optional={settings.sttMode === "auto"} />
       )}
 
       {(settings.sttMode === "xai" || settings.sttMode === "auto") && (

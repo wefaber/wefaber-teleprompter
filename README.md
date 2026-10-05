@@ -363,6 +363,25 @@ unos grados por debajo del lente y se nota. Dos formas de achicarlo:
 | G | Grabar / terminar la toma |
 | R | Reiniciar reloj, base de voz y notas |
 
+## Actualizaciones
+
+La app instalada se actualiza sola desde Ajustes → Actualizaciones: busca al
+abrir ese panel, baja el instalador firmado y reinicia (`tauri-plugin-updater`,
+que lee `latest.json` de la última Release de GitHub).
+
+Publicar una versión:
+
+1. Subir la versión en `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml` y
+   `package.json`.
+2. Mergear a `main` y crear el tag: `git tag vX.Y.Z && git push origin vX.Y.Z`.
+3. `.github/workflows/release.yml` arma el instalador, lo firma y publica la
+   Release con `latest.json`. Falla si el tag no coincide con `tauri.conf.json`.
+
+La clave de firma privada vive en el secreto `TAURI_SIGNING_PRIVATE_KEY` del
+repo (y en `~/.tauri/apuntador.key`, fuera del repo); la pública está en
+`tauri.conf.json`. Si se pierde la privada, las apps instaladas no pueden
+actualizarse: hay que reinstalar a mano con una pública nueva.
+
 ## Tests
 
 ```bash
