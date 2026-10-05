@@ -11,23 +11,31 @@
 //!
 //! El protocolo (mensajes JSON por /ws) está en `src/lib/phone-protocol.ts`:
 //! una app nativa de iOS puede hablarlo igual que la página.
+//!
+//! Al grabar, el teléfono además graba a calidad completa y sube la toma en
+//! pedazos por POST /rec, que se escriben a disco con `take.rs`.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
-use axum::extract::{Query, State};
+use axum::body::Bytes;
+use axum::extract::{DefaultBodyLimit, Query, State};
 use axum::http::{header, StatusCode};
 use axum::response::{IntoResponse, Redirect, Response};
-use axum::routing::get;
+use axum::routing::{get, post};
 use axum::Router;
 use futures_util::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
 
+use crate::take::{Put, PutError, Takes};
+
 pub const PORT: u16 = 5190;
 /// El puerto público de Funnel. El 443 queda para la tailnet.
 const PUBLIC_PORT: u16 = 8443;
+/// Un pedazo de un segundo a 100 Mbps entra de sobra.
+const MAX_CHUNK: usize = 64 << 20;
 const TAILSCALE: &str = r"C:\Program Files\Tailscale\tailscale.exe";
 
 #[derive(Clone, Copy, PartialEq, Eq, Deserialize)]
@@ -69,6 +77,7 @@ impl Peers {
 struct Hub {
     token: Arc<str>,
     peers: Arc<Mutex<Peers>>,
+    takes: Arc<Takes>,
 }
 
 /// Lo que la interfaz necesita para mostrar el QR.
@@ -88,6 +97,7 @@ pub struct Phone {
     token: String,
     error: Arc<Mutex<Option<String>>>,
     public: AtomicBool,
+    takes: Arc<Takes>,
 }
 
 impl Phone {
@@ -96,7 +106,8 @@ impl Phone {
     pub fn start() -> Self {
         let token = new_token();
         let error = Arc::new(Mutex::new(None));
-        let hub = Hub { token: token.as_str().into(), peers: Arc::default() };
+        let takes = Arc::new(Takes::default());
+        let hub = Hub { token: token.as_str().into(), peers: Arc::default(), takes: takes.clone() };
         let slot = error.clone();
         tauri::async_runtime::spawn(async move {
             if let Err(e) = serve(hub).await {
@@ -106,7 +117,16 @@ impl Phone {
                 }
             }
         });
-        Phone { token, error, public: AtomicBool::new(false) }
+        Phone { token, error, public: AtomicBool::new(false), takes }
+    }
+
+    /// La toma del iPhone va a `dir/base.mp4` (la extensión la pone el teléfono).
+    pub fn take_begin(&self, id: &str, dir: &std::path::Path, base: &str) -> Result<(), String> {
+        self.takes.begin(id, dir, base)
+    }
+
+    pub fn take_end(&self, id: &str) -> Result<crate::rec::Saved, String> {
+        self.takes.end(id)
     }
 
     /// Prende o apaga el link temporal. Apagar no toca lo de la tailnet.
@@ -183,6 +203,7 @@ fn router(hub: Hub) -> Router {
         .route("/telefono", get(|| async { asset("index.html", "text/html; charset=utf-8") }))
         .route("/telefono/app.js", get(|| async { asset("app.js", "text/javascript; charset=utf-8") }))
         .route("/ws", get(socket))
+        .route("/rec", post(chunk).layer(DefaultBodyLimit::max(MAX_CHUNK)))
         .with_state(hub)
 }
 
@@ -210,6 +231,37 @@ fn asset(name: &str, mime: &'static str) -> Response {
     match body {
         Some(b) => ([(header::CONTENT_TYPE, mime), (header::CACHE_CONTROL, "no-store")], b).into_response(),
         None => (StatusCode::NOT_FOUND, "Falta la página del teléfono: corré bun run phone:build").into_response(),
+    }
+}
+
+#[derive(Deserialize)]
+struct Chunk {
+    t: String,
+    take: String,
+    seq: u64,
+    ext: String,
+}
+
+/// Un pedazo de la toma del iPhone. 404: la toma ya no existe (que el
+/// teléfono deje de grabar); 409: falta uno anterior (`expected`).
+async fn chunk(State(hub): State<Hub>, Query(q): Query<Chunk>, body: Bytes) -> Response {
+    if q.t != *hub.token {
+        return StatusCode::FORBIDDEN.into_response();
+    }
+    let takes = hub.takes.clone();
+    let put = tokio::task::spawn_blocking(move || takes.put(&q.take, q.seq, &q.ext, &body)).await;
+    match put {
+        Ok(Ok(Put::Written | Put::Repeated)) => StatusCode::NO_CONTENT.into_response(),
+        Ok(Err(PutError::Unknown)) => (StatusCode::NOT_FOUND, "No hay una toma abierta").into_response(),
+        Ok(Err(PutError::Gap { expected })) => {
+            (StatusCode::CONFLICT, axum::Json(serde_json::json!({ "expected": expected }))).into_response()
+        }
+        Ok(Err(PutError::Invalid(e))) => (StatusCode::BAD_REQUEST, e).into_response(),
+        Ok(Err(PutError::Io(e))) => {
+            log::error!("toma del iPhone: {e}");
+            (StatusCode::INTERNAL_SERVER_ERROR, e).into_response()
+        }
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     }
 }
 
@@ -287,7 +339,7 @@ mod tests {
     use tokio_tungstenite::tungstenite::Message as Msg;
 
     async fn start(token: &str) -> u16 {
-        let hub = Hub { token: token.into(), peers: Arc::default() };
+        let hub = Hub { token: token.into(), peers: Arc::default(), takes: Arc::default() };
         let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
         let port = listener.local_addr().unwrap().port();
         tokio::spawn(async move { axum::serve(listener, router(hub)).await.unwrap() });
@@ -347,14 +399,47 @@ mod tests {
         assert!(gone, "la PC se entera de que se fue el teléfono");
     }
 
+    #[tokio::test]
+    async fn receives_the_phone_take() {
+        let takes: Arc<Takes> = Arc::default();
+        let hub = Hub { token: "abc".into(), peers: Arc::default(), takes: takes.clone() };
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        tokio::spawn(async move { axum::serve(listener, router(hub)).await.unwrap() });
+
+        let dir = std::env::temp_dir().join(format!("apuntador-phone-take-{}", std::process::id()));
+        let client = reqwest::Client::new();
+        let put = |t: &str, seq: u64, body: Vec<u8>| {
+            client.post(format!("http://127.0.0.1:{port}/rec?t={t}&take=k1&seq={seq}&ext=mp4")).body(body).send()
+        };
+
+        assert_eq!(put("abc", 0, b"x".to_vec()).await.unwrap().status(), 404, "sin toma abierta");
+        takes.begin("k1", &dir, "toma-iphone").unwrap();
+        assert_eq!(put("mal", 0, b"x".to_vec()).await.unwrap().status(), 403, "sin el token no");
+        // Un pedazo grande pasa: el límite por defecto de axum es 2 MB.
+        let big = vec![7u8; 6 << 20];
+        assert_eq!(put("abc", 0, big.clone()).await.unwrap().status(), 204);
+        assert_eq!(put("abc", 0, big.clone()).await.unwrap().status(), 204, "reintento");
+        let gap = put("abc", 5, b"z".to_vec()).await.unwrap();
+        assert_eq!(gap.status(), 409);
+        assert_eq!(gap.json::<serde_json::Value>().await.unwrap()["expected"], 1);
+        assert_eq!(put("abc", 1, b"fin".to_vec()).await.unwrap().status(), 204);
+
+        let saved = takes.end("k1").unwrap();
+        assert_eq!(saved.bytes, (6 << 20) + 3);
+        assert_eq!(std::fs::metadata(dir.join("toma-iphone.mp4")).unwrap().len(), saved.bytes);
+        assert_eq!(put("abc", 2, b"x".to_vec()).await.unwrap().status(), 404, "terminada");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
     /// Prende el link temporal, deja la URL impresa 20 s y lo apaga.
     /// `cargo test --lib public_link -- --ignored --nocapture`
     #[tokio::test]
     #[ignore]
     async fn public_link() {
-        let hub = Hub { token: "prueba".into(), peers: Arc::default() };
+        let hub = Hub { token: "prueba".into(), peers: Arc::default(), takes: Arc::default() };
         tokio::spawn(async move { serve(hub).await.unwrap() });
-        let phone = Phone { token: "prueba".into(), error: Arc::default(), public: AtomicBool::new(false) };
+        let phone = Phone { token: "prueba".into(), error: Arc::default(), public: AtomicBool::new(false), takes: Arc::default() };
         phone.set_public(true).unwrap();
         println!("abierto: {:?}", phone.info().url);
         tokio::time::sleep(std::time::Duration::from_secs(20)).await;
@@ -362,11 +447,26 @@ mod tests {
         println!("cerrado: {:?}", phone.info().url);
     }
 
+    /// La toma del iPhone a mano: token `prueba`, toma `prueba1` abierta 3 minutos.
+    /// `cargo test --lib take_for_manual_test -- --ignored --nocapture`
+    #[tokio::test]
+    #[ignore]
+    async fn take_for_manual_test() {
+        let takes: Arc<Takes> = Arc::default();
+        let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
+        let dir = std::env::temp_dir().join(format!("apuntador-manual-take-{stamp}"));
+        takes.begin("prueba1", &dir, "toma-prueba-iphone").unwrap();
+        let hub = Hub { token: "prueba".into(), peers: Arc::default(), takes: takes.clone() };
+        tokio::spawn(async move { serve(hub).await.unwrap() });
+        tokio::time::sleep(std::time::Duration::from_secs(180)).await;
+        println!("toma: {:?}", takes.end("prueba1").map(|s| (s.path, s.bytes)));
+    }
+
     /// Para probar la página a mano: sirve en el puerto de siempre con el token `prueba`.
     /// `cargo test --lib serve_for_manual_test -- --ignored`
     #[tokio::test]
     #[ignore]
     async fn serve_for_manual_test() {
-        serve(Hub { token: "prueba".into(), peers: Arc::default() }).await.unwrap();
+        serve(Hub { token: "prueba".into(), peers: Arc::default(), takes: Arc::default() }).await.unwrap();
     }
 }

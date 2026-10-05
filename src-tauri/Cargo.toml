@@ -1,6 +1,6 @@
 [package]
 name = "wefaber-teleprompter"
-version = "0.1.0"
+version = "0.2.1"
 description = "Apuntador: teleprompter por puntos que sigue lo que decís"
 authors = ["Faku"]
 edition = "2021"
@@ -29,6 +29,8 @@ sha2 = "0.10"
 flate2 = "1"
 tar = "0.4"
 log = "0.4"
+tauri-plugin-updater = "2"
+tauri-plugin-process = "2"
 
 [target.'cfg(windows)'.dependencies]
 # DirectML: cualquier GPU de Windows (NVIDIA, AMD, Intel) sin CUDA.

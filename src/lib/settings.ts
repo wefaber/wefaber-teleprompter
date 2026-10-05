@@ -61,6 +61,8 @@ export type Settings = {
   phoneFacing: Facing;
   /** "temporal": link por internet (Tailscale Funnel) para cuando el teléfono no resuelve la tailnet. */
   phoneRoute: PhoneRoute;
+  /** Al grabar, el iPhone graba también a resolución completa y manda el archivo. */
+  phoneRecord: boolean;
   /** La voz del coach por los auriculares. */
   voiceMode: VoiceMode;
   voice: VoiceId;
@@ -103,6 +105,7 @@ export const DEFAULTS: Settings = {
   recordMbps: 40,
   phoneFacing: "environment",
   phoneRoute: "temporal",
+  phoneRecord: true,
   voiceMode: "auriculares",
   voice: "edge:es-AR-TomasNeural",
   sttMode: "auto",

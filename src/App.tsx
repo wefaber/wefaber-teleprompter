@@ -13,7 +13,7 @@ import type { Prosody } from "./lib/coach";
 import DEFAULT_SCRIPT from "./lib/default-script.md?raw";
 import type { Transport } from "./lib/llm";
 import { Tracker, type Snapshot } from "./lib/match";
-import { openMic, Recording, type Saved } from "./lib/recorder";
+import { openMic, phoneTakeBase, Recording, type Saved } from "./lib/recorder";
 import { parseScript, type Doc } from "./lib/script";
 import { PHONE_CAMERA, loadSettings, saveSettings, surface, type Settings } from "./lib/settings";
 import { activeScript, loadLibrary, saveLibrary, type Library } from "./lib/library";
@@ -154,6 +154,9 @@ export function App() {
   const recording = useRef<Recording | null>(null);
   const [recState, setRecState] = useState<{ on: boolean; busy: boolean }>({ on: false, busy: false });
   const [saved, setSaved] = useState<(Saved & { error?: string }) | null>(null);
+  // La toma del iPhone, a calidad completa, en paralelo con la de la PC.
+  const phoneTake = useRef<{ id: string; started: Promise<unknown> } | null>(null);
+  const [phoneSaved, setPhoneSaved] = useState<(Saved & { error?: string }) | null>(null);
   const [recError, setRecError] = useState<string | null>(null);
 
   // El tiempo de la toma y la luz, al teléfono. El reloj se manda cada vez que
@@ -167,24 +170,70 @@ export function App() {
     if (phone.state.phone) phone.link.current?.sendLight(settings.light);
   }, [phone.state.phone, phone.link, settings.light]);
 
+  const phoneLink = phone.link;
+  const startPhoneTake = useCallback(
+    (at: Date) => {
+      const link = phoneLink.current;
+      if (!link) return;
+      const id = crypto.randomUUID().replaceAll("-", "");
+      const started = invoke("phone_take_begin", { take: id, base: phoneTakeBase(at) })
+        .then(() => link.startTake(id, settings.recordMbps * 1_000_000))
+        .then(({ warning }) => warning && setRecError(warning));
+      started.catch((e: unknown) => setRecError(`El iPhone no graba (queda la vista previa): ${e instanceof Error ? e.message : String(e)}`));
+      phoneTake.current = { id, started };
+    },
+    [phoneLink, settings.recordMbps],
+  );
+
+  /** Termina la del iPhone y espera a que llegue entera. null si nunca arrancó. */
+  const finishPhoneTake = useCallback(
+    async (take: { id: string; started: Promise<unknown> }): Promise<(Saved & { error?: string }) | null> => {
+      const ok = await take.started.then(
+        () => true,
+        () => false,
+      );
+      let problem: string | null = null;
+      if (ok) {
+        try {
+          const link = phoneLink.current;
+          if (!link) throw new Error("Se cerró la cámara del iPhone");
+          problem = (await link.stopTake(take.id)).error;
+        } catch (e) {
+          problem = `${e instanceof Error ? e.message : String(e)}: se guardó lo que llegó`;
+        }
+      }
+      try {
+        const s = await invoke<Saved>("phone_take_end", { take: take.id });
+        return problem ? { ...s, error: problem } : s;
+      } catch (e) {
+        return ok ? { path: "", bytes: 0, error: problem ?? (e instanceof Error ? e.message : String(e)) } : null;
+      }
+    },
+    [phoneLink],
+  );
+
   const stopRecording = useCallback(async () => {
     const rec = recording.current;
     if (!rec) return;
     recording.current = null;
+    const take = phoneTake.current;
+    phoneTake.current = null;
     setRecState({ on: false, busy: true });
-    try {
-      setSaved(await rec.stop());
-    } catch (e) {
-      setSaved({ path: rec.path, bytes: 0, error: e instanceof Error ? e.message : String(e) });
-    } finally {
-      rec.stopMic();
-      setRecState({ on: false, busy: false });
-    }
-  }, []);
+    const pc = rec.stop().then(
+      (s): Saved & { error?: string } => s,
+      (e: unknown) => ({ path: rec.path, bytes: 0, error: e instanceof Error ? e.message : String(e) }),
+    );
+    const [pcSaved, fromPhone] = await Promise.all([pc, take ? finishPhoneTake(take) : null]);
+    rec.stopMic();
+    setSaved(pcSaved);
+    setPhoneSaved(fromPhone);
+    setRecState({ on: false, busy: false });
+  }, [finishPhoneTake]);
 
   const startRecording = useCallback(async () => {
     setRecError(null);
     setSaved(null);
+    setPhoneSaved(null);
     if (!settings.camera) {
       setSettings((s) => ({ ...s, camera: true }));
       setRecError("Prendí la cámara. Cuando se vea, apretá grabar otra vez.");
@@ -200,6 +249,7 @@ export function App() {
       mic = await openMic(settings.recordMic);
       // Con el permiso dado, la lista ya trae los nombres de los micrófonos.
       setCameraOpened((n) => n + 1);
+      const at = new Date();
       const rec = await Recording.start({
         video: cameraStream,
         audio: mic,
@@ -207,15 +257,17 @@ export function App() {
         bitrate: settings.recordMbps * 1_000_000,
         tauri: inTauri(),
         onError: setRecError,
+        date: at,
       });
       recording.current = rec;
       setRecState({ on: true, busy: false });
+      if (isPhone && settings.phoneRecord && inTauri()) startPhoneTake(at);
     } catch (e) {
       mic?.getTracks().forEach((t) => t.stop());
       setRecError(e instanceof Error ? e.message : String(e));
       setRecState({ on: false, busy: false });
     }
-  }, [settings.camera, settings.recordMic, settings.recordContainer, settings.recordMbps, cameraStream]);
+  }, [settings.camera, settings.recordMic, settings.recordContainer, settings.recordMbps, settings.phoneRecord, cameraStream, isPhone, startPhoneTake]);
 
   const toggleRecord = useCallback(() => {
     if (recState.busy) return;
@@ -563,6 +615,11 @@ export function App() {
               {String(mm).padStart(2, "0")}:{String(ss).padStart(2, "0")}
             </span>
             {recState.on && <RecClock since={recording.current?.started ?? Date.now()} />}
+            {phone.state.upload && (recState.busy || phone.state.upload.pending > 2) && (
+              <span className="tabular-nums" title="La toma del iPhone llega a la PC mientras grabás">
+                iPhone: {phone.state.upload.pending} s por llegar · {(phone.state.upload.sentBytes / 1_048_576).toFixed(0)} MB
+              </span>
+            )}
             {settings.coach && coaching.live.wpm !== null && <span className="tabular-nums">{coaching.live.wpm} ppm</span>}
             {settings.coach && coaching.live.toneSt !== null && (
               <span className="tabular-nums">
@@ -583,7 +640,7 @@ export function App() {
         <p className="absolute inset-x-0 bottom-6 m-0 text-center font-mono text-xs text-[var(--muted)]">Solo luz · L para volver al texto</p>
       )}
 
-      {(saved || recError) && (
+      {(saved || phoneSaved || recError) && (
         <div
           className="island absolute bottom-12 left-5 z-10 flex max-w-[min(34rem,calc(100%-2.5rem))] items-start gap-3 px-4 py-3 text-sm"
           role="status"
@@ -600,6 +657,29 @@ export function App() {
                 </p>
               </>
             )}
+            {phoneSaved && (
+              <>
+                <p className="m-0 mt-2 flex items-center gap-2 font-bold">
+                  {phoneSaved.path ? (phoneSaved.error ? "iPhone, con errores" : "iPhone, calidad completa") : "El iPhone no guardó la toma"}
+                  {phoneSaved.path && (
+                    <button
+                      type="button"
+                      onClick={() => void invoke("rec_reveal", { path: phoneSaved.path }).catch((e: unknown) => setRecError(String(e)))}
+                      className="flex items-center gap-1 rounded-md border border-[var(--edge)] px-2 py-0.5 text-xs font-normal hover:bg-[var(--faint)]"
+                    >
+                      <FolderOpen className="size-3.5" /> Ver
+                    </button>
+                  )}
+                </p>
+                {phoneSaved.error && <p className="m-0 text-[var(--color-signal)]">{phoneSaved.error}</p>}
+                {phoneSaved.path && (
+                  <p className="m-0 break-all font-mono text-xs text-[var(--muted)]">
+                    {phoneSaved.path}
+                    {phoneSaved.bytes > 0 && ` · ${(phoneSaved.bytes / 1_048_576).toFixed(0)} MB`}
+                  </p>
+                )}
+              </>
+            )}
           </div>
           {saved && inTauri() && (
             <button
@@ -614,6 +694,7 @@ export function App() {
             type="button"
             onClick={() => {
               setSaved(null);
+              setPhoneSaved(null);
               setRecError(null);
             }}
             className="grid size-7 shrink-0 place-items-center rounded-full hover:bg-[var(--faint)]"

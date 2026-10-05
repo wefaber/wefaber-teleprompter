@@ -1,5 +1,6 @@
 import { Group, Range, Segmented, Toggle } from "./controls";
 import { EngineSettings } from "./EngineSettings";
+import { Updates } from "./Updates";
 import { Download, X } from "lucide-react";
 import type { ReactNode } from "react";
 import { ASPECTS, CAPTURE_MODES, type Aspect, type Rotation } from "../lib/camera";
@@ -322,6 +323,17 @@ export function SettingsPanel({ settings, onChange, engine, inputs, model, progr
                     ? "Un link por internet (Tailscale Funnel) que se cierra al cambiar de cámara o cerrar la app. Pasa la página y el armado de la conexión, con token; la imagen va directo por el WiFi."
                     : "Solo dentro de la tailnet: el iPhone necesita Tailscale con su DNS prendido."}
                 </p>
+                <Toggle
+                  id="phone-record"
+                  label="Grabar también en el iPhone"
+                  hint={
+                    settings.phoneRoute === "temporal"
+                      ? "A resolución completa, con el micrófono del iPhone, en un archivo aparte. Con el link temporal la toma sube por internet: con la tailnet va directo y mucho más rápido."
+                      : "A resolución completa, con el micrófono del iPhone, en un archivo aparte que llega a la PC mientras grabás."
+                  }
+                  checked={settings.phoneRecord}
+                  onChange={(v) => onChange({ phoneRecord: v })}
+                />
                 <p className="m-0 font-mono text-xs text-[var(--muted)]">
                   {!phone?.server
                     ? "Servidor apagado"
@@ -503,6 +515,10 @@ export function SettingsPanel({ settings, onChange, engine, inputs, model, progr
           </div>
         )}
         {model && <EngineSettings settings={settings} onChange={onChange} modelPresent={model.present} listening={listening} />}
+      </Group>
+
+      <Group label="Actualizaciones">
+        <Updates />
       </Group>
     </div>
   );

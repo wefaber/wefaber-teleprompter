@@ -27,7 +27,9 @@ xAI (ver [Motores de voz](#motores-de-voz)).
 | `src/lib/library.ts` | Los guiones guardados y cuál se usa. |
 | `src/lib/voice.ts` | La voz del coach: proveedores, auriculares y cuándo hablar. |
 | `src-tauri/src/tts.rs` | Voces neurales de Edge, a MP3. |
-| `src-tauri/src/phone.rs` | Servidor local del iPhone: sirve su página y pasa los mensajes de WebRTC. |
+| `src-tauri/src/phone.rs` | Servidor local del iPhone: sirve su página, pasa los mensajes de WebRTC y recibe la toma. |
+| `src-tauri/src/take.rs` | Escribe en orden los pedazos de la toma que graba el iPhone. |
+| `src/lib/phone-take.ts` | El lado teléfono de esa toma: formato y subida con reintentos. |
 | `src/lib/phone-protocol.ts` | Los mensajes entre la PC y el teléfono (una app nativa habla lo mismo). |
 | `src/lib/phone-link.ts` | El lado PC del iPhone: contesta la oferta y entrega el video. |
 | `phone/` | La página que abre el iPhone (`bun run phone:build` la arma en `dist-phone/`). |
@@ -292,8 +294,39 @@ queda hasta ahí.
   pasarlo a MOV sin recomprimir:
   `ffmpeg -i toma.mkv -c copy toma.mov`. **MP4**: audio AAC, listo para subir.
 - Si la cámara se cierra o cambia a mitad de la toma, se guarda lo grabado.
-- Con el iPhone, por ahora se graba la vista previa (1280 px). Grabar en el
-  teléfono a resolución completa es lo próximo.
+- Con el iPhone, ver abajo: además de la vista previa, el teléfono graba a
+  resolución completa.
+
+### Con el iPhone
+
+Con *Grabar también en el iPhone* (Ajustes → Cámara, prendido por defecto),
+**G** graba dos archivos con la misma hora en el nombre:
+
+- `toma-….mkv`: la vista previa (1280 px) con el micrófono de la PC, como
+  siempre. Sirve de respaldo y trae el audio bueno.
+- `toma-…-iphone.mp4`: la cámara del iPhone tal cual la abre (4K en la
+  trasera), con el micrófono del iPhone, al bitrate de Ajustes → Grabación.
+
+El teléfono graba con MediaRecorder y manda un pedazo por segundo a la PC
+(`POST /rec` al mismo servidor, con el token), que lo escribe a disco en
+orden (`src-tauri/src/take.rs`). Los pedazos van numerados: un reintento no se
+escribe dos veces y si falta uno la PC lo dice. Al terminar la toma, la PC
+espera a que llegue lo que falta; abajo se ve cuántos segundos quedan.
+
+- Prueba los formatos en orden (MP4 H.264, después WebM) y se queda con el
+  primero que de verdad produce video: algunos navegadores dicen que soportan
+  MP4 y el codificador no arranca.
+- Mientras graba no se puede cambiar de cámara.
+- El permiso del micrófono del iPhone se pide al tocar *Conectar la cámara*.
+- **Con el link temporal la toma sube por internet** (Funnel): depende de la
+  subida de tu conexión. Con la tailnet va directo y es mucho más rápido.
+- Si se bloquea la pantalla, Safari corta la cámara: queda lo que llegó y la
+  PC avisa. Desactivá el bloqueo automático.
+- Si la PC cierra la toma (o se reinició), el teléfono deja de grabar.
+
+Para probarlo sin la app: `cargo test --lib take_for_manual_test -- --ignored
+--nocapture` abre la toma `prueba1` en el puerto 5190 (token `prueba`) por
+3 minutos.
 
 ## Mirar a cámara
 
@@ -329,6 +362,25 @@ unos grados por debajo del lente y se nota. Dos formas de achicarlo:
 | C | Vista previa de la cámara |
 | G | Grabar / terminar la toma |
 | R | Reiniciar reloj, base de voz y notas |
+
+## Actualizaciones
+
+La app instalada se actualiza sola desde Ajustes → Actualizaciones: busca al
+abrir ese panel, baja el instalador firmado y reinicia (`tauri-plugin-updater`,
+que lee `latest.json` de la última Release de GitHub).
+
+Publicar una versión:
+
+1. Subir la versión (nunca reusar un tag: las releases son inmutables) en `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml` y
+   `package.json`.
+2. Mergear a `main` y crear el tag: `git tag vX.Y.Z && git push origin vX.Y.Z`.
+3. `.github/workflows/release.yml` arma el instalador, lo firma y publica la
+   Release con `latest.json`. Falla si el tag no coincide con `tauri.conf.json`.
+
+La clave de firma privada vive en el secreto `TAURI_SIGNING_PRIVATE_KEY` del
+repo (y en `~/.tauri/apuntador.key`, fuera del repo); la pública está en
+`tauri.conf.json`. Si se pierde la privada, las apps instaladas no pueden
+actualizarse: hay que reinstalar a mano con una pública nueva.
 
 ## Tests
 

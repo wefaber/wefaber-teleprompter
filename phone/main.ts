@@ -1,10 +1,12 @@
 /**
  * La página del iPhone: abre la cámara, se la manda a la PC por WebRTC y,
- * con la frontal, muestra el guion pegado al lente. Habla el protocolo de
- * src/lib/phone-protocol.ts; una app nativa podría reemplazarla.
+ * con la frontal, muestra el guion pegado al lente. Cuando la PC graba, graba
+ * también acá a resolución completa y le sube la toma en pedazos. Habla el
+ * protocolo de src/lib/phone-protocol.ts; una app nativa podría reemplazarla.
  */
 
 import { parse, type Facing, type PhoneScript, type ToPc, type ToPhone } from "../src/lib/phone-protocol";
+import { phoneFormats, Uploader, type PhoneFormat, type PostResult } from "../src/lib/phone-take";
 
 const FACING_KEY = "apuntador:camara";
 /** Tope de la vista previa: se ve bien y no ahoga el WiFi. */
@@ -19,6 +21,14 @@ const dot = $("dot");
 const token = new URLSearchParams(location.search).get("t") ?? "";
 let facing: Facing = readFacing();
 let stream: MediaStream | null = null;
+/** El micrófono del iPhone, solo para la toma que se graba acá. */
+let mic: MediaStream | null = null;
+type Take = { id: string; recorder: MediaRecorder; uploader: Uploader; requested: boolean };
+let take: Take | null = null;
+/** Probando formatos: tampoco se cambia de cámara. */
+let starting = false;
+/** Segundos grabados que todavía no llegaron a la PC. */
+let backlog = 0;
 let ws: WebSocket | null = null;
 let pc: RTCPeerConnection | null = null;
 let pcHere = false;
@@ -38,7 +48,7 @@ function renderClock() {
   $("clock").classList.toggle("paused", !clock.running);
   const rec = $("rec");
   rec.hidden = clock.recMs === null;
-  if (clock.recMs !== null) rec.textContent = `● REC ${mmss(clock.recMs + since)}`;
+  if (clock.recMs !== null) rec.textContent = `● REC ${mmss(clock.recMs + since)}${backlog > 2 ? ` · ${backlog} s por subir` : ""}`;
 }
 setInterval(renderClock, 250);
 
@@ -103,6 +113,11 @@ async function openCamera(f: Facing): Promise<MediaStream> {
 }
 
 async function useFacing(f: Facing) {
+  // Cambiar la pista cortaría la grabación.
+  if (take || starting) {
+    sendStatus();
+    return;
+  }
   try {
     const next = await openCamera(f);
     const track = next.getVideoTracks()[0];
@@ -205,6 +220,132 @@ async function onMessage(msg: ToPhone) {
     case "light":
       setLight(msg.color);
       break;
+    case "record":
+      await startTake(msg.take, msg.bitrate);
+      break;
+    case "record-stop":
+      stopTake(msg.take);
+      break;
+  }
+}
+
+async function postChunk(id: string, seq: number, ext: string, chunk: Blob): Promise<PostResult> {
+  const q = new URLSearchParams({ t: token, take: id, seq: String(seq), ext });
+  try {
+    const r = await fetch(`/rec?${q}`, { method: "POST", body: chunk, headers: { "Content-Type": "application/octet-stream" } });
+    if (r.ok) return { ok: true };
+    if (r.status === 404) return { gone: true };
+    if (r.status === 409) return { expected: ((await r.json()) as { expected: number }).expected };
+    return { retry: `la PC contestó ${r.status}` };
+  } catch (e) {
+    return { retry: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+/** Graba la cámara tal cual la abre el teléfono (no la vista previa achicada). */
+async function startTake(id: string, bitrate: number) {
+  const fail = (error: string) => send({ type: "recording", take: id, mime: null, error });
+  if (take || starting) return fail("El iPhone ya está grabando");
+  const video = stream?.getVideoTracks()[0];
+  if (!video || video.readyState !== "live") return fail("La cámara del iPhone no está abierta");
+  const formats = phoneFormats((m) => MediaRecorder.isTypeSupported(m));
+  if (!formats.length) return fail("Este navegador no puede grabar video");
+  const audio = mic?.getAudioTracks().filter((t) => t.readyState === "live") ?? [];
+  starting = true;
+  $<HTMLButtonElement>("flip").disabled = true;
+  let problem = "";
+  try {
+    for (const format of formats) {
+      const tried = await tryFormat(new MediaStream([video, ...audio]), format, bitrate);
+      if ("error" in tried) {
+        problem = tried.error;
+        continue;
+      }
+      begin(id, tried.recorder, tried.first, format);
+      send({ type: "recording", take: id, mime: format.mime, error: audio.length ? null : "Sin micrófono del iPhone: se graba solo la imagen" });
+      return;
+    }
+  } finally {
+    starting = false;
+  }
+  $<HTMLButtonElement>("flip").disabled = false;
+  fail(`El iPhone no pudo grabar: ${problem}`);
+}
+
+/** Arranca y espera el primer pedazo con datos: recién ahí el formato anda. */
+function tryFormat(media: MediaStream, format: PhoneFormat, bitrate: number): Promise<{ recorder: MediaRecorder; first: Blob } | { error: string }> {
+  let recorder: MediaRecorder;
+  try {
+    recorder = new MediaRecorder(media, { mimeType: format.mime, videoBitsPerSecond: bitrate, audioBitsPerSecond: 256_000 });
+  } catch (e) {
+    return Promise.resolve({ error: e instanceof Error ? e.message : String(e) });
+  }
+  return new Promise((resolve) => {
+    const give = (r: { recorder: MediaRecorder; first: Blob } | { error: string }) => {
+      clearTimeout(timer);
+      recorder.ondataavailable = null;
+      recorder.onerror = null;
+      if ("error" in r && recorder.state !== "inactive") recorder.stop();
+      resolve(r);
+    };
+    const timer = setTimeout(() => give({ error: `${format.mime} no arrancó` }), 4_000);
+    recorder.ondataavailable = (e) => e.data.size && give({ recorder, first: e.data });
+    recorder.onerror = (e) => {
+      const err = (e as Event & { error?: { message?: string } }).error;
+      give({ error: err?.message ?? `${format.mime} falló` });
+    };
+    recorder.start(1_000);
+  });
+}
+
+function begin(id: string, recorder: MediaRecorder, first: Blob, format: PhoneFormat) {
+  const uploader = new Uploader({
+    post: (seq, chunk) => postChunk(id, seq, format.ext, chunk),
+    onProgress: (sentBytes, pending) => {
+      backlog = pending;
+      send({ type: "upload", take: id, sentBytes, pending });
+    },
+    onGone: () => recorder.state !== "inactive" && recorder.stop(),
+  });
+  const current: Take = { id, recorder, uploader, requested: false };
+  take = current;
+  uploader.push(first);
+  backlog = uploader.pending;
+  recorder.ondataavailable = (e) => {
+    uploader.push(e.data);
+    backlog = uploader.pending;
+  };
+  // Termina por pedido de la PC o porque el teléfono cortó la cámara.
+  recorder.addEventListener("stop", () => void finishTake(current), { once: true });
+}
+
+function stopTake(id: string) {
+  if (take?.id !== id) {
+    send({ type: "recorded", take: id, chunks: 0, bytes: 0, error: "El iPhone no estaba grabando esa toma" });
+    return;
+  }
+  take.requested = true;
+  if (take.recorder.state !== "inactive") take.recorder.stop();
+}
+
+async function finishTake(current: Take) {
+  const result = await current.uploader.close();
+  if (take === current) take = null;
+  backlog = 0;
+  $<HTMLButtonElement>("flip").disabled = false;
+  const cut = current.requested ? null : "La grabación del iPhone se cortó (¿se bloqueó la pantalla?)";
+  send({ type: "recorded", take: current.id, ...result, error: result.error ?? cut });
+}
+
+/** Con el permiso pedido al tocar Conectar: después nadie está mirando el teléfono. */
+async function openMic() {
+  try {
+    mic = await navigator.mediaDevices.getUserMedia({
+      video: false,
+      audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
+    });
+  } catch {
+    mic = null;
   }
 }
 
@@ -273,6 +414,7 @@ $("go").addEventListener("click", async () => {
   $("start").remove();
   void keepAwake();
   await useFacing(facing);
+  await openMic();
   connect();
 });
 
