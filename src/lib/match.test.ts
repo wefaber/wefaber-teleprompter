@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import DEFAULT_SCRIPT from "./default-script.md" with { type: "text" };
-import { Tracker, stem, words } from "./match";
+import { DEFAULT_TRACKER, Tracker, stem, words } from "./match";
 import { parseScript } from "./script";
 
 const SCRIPT = `
@@ -225,5 +225,38 @@ describe("Tracker con ayuda de afuera", () => {
     const t = new Tracker(doc);
     t.propose(1, 5_000);
     expect(t.propose(2, 6_000).index).toBe(1);
+  });
+});
+
+describe("Tracker presentando", () => {
+  const doc = parseScript(SCRIPT);
+  const presenting = { ...DEFAULT_TRACKER, onlyNext: true };
+
+  test("con onlyNext no se saltea puntos por voz", () => {
+    const t = new Tracker(doc, presenting);
+    t.final("filtros de rubro", 1_000);
+    t.final("el mercado: sueldos medios, cuánto es el salario por puesto", 6_000);
+    expect(t.final("los sueldos del mercado, el salario medio de cada puesto", 9_000).index).toBe(0);
+  });
+
+  test("con onlyNext el siguiente pasa igual", () => {
+    const t = new Tracker(doc, presenting);
+    t.final("los filtros por rubro y departamento", 1_000);
+    expect(t.final("y si es tu primer empleo marcás sin experiencia", 5_000).index).toBe(1);
+  });
+
+  test("con onlyNext una opinión de afuera tampoco salta", () => {
+    const t = new Tracker(doc, presenting);
+    expect(t.propose(2, 5_000).index).toBe(0);
+    expect(t.propose(2, 6_000).index).toBe(0);
+  });
+
+  test("held ignora lo que entra mientras suena un video", () => {
+    const t = new Tracker(doc);
+    t.held = true;
+    expect(t.final("tenés filtros por rubro y por departamento", 1_000).covered.size).toBe(0);
+    expect(t.partial("filtros por rubro y departamento", 1_500).covered.size).toBe(0);
+    t.held = false;
+    expect(t.final("tenés filtros por rubro y por departamento", 2_000).covered.has(0)).toBe(true);
   });
 });
