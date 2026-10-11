@@ -1,7 +1,10 @@
-import { ClipboardCopy, Copy, FilePlus, FileUp, RotateCcw, Trash2, X } from "lucide-react";
+import { invoke } from "@tauri-apps/api/core";
+import { open as pickFolder } from "@tauri-apps/plugin-dialog";
+import { ClipboardCopy, Copy, FilePlus, FileUp, FolderOpen, RotateCcw, Trash2, X } from "lucide-react";
 import { useMemo, useRef, useState } from "react";
 import { BLANK_SCRIPT, activeScript, add, nameOf, remove, select, uniqueName, update, type Library } from "../lib/library";
 import { parseScript } from "../lib/script";
+import { inTauri } from "../lib/speech";
 
 type Props = {
   library: Library;
@@ -22,6 +25,7 @@ export function Editor({ library, fallback, onSave, onClose }: Props) {
   const [name, setName] = useState(current.name);
   const [confirm, setConfirm] = useState<"ejemplo" | "borrar" | null>(null);
   const [copied, setCopied] = useState(false);
+  const [folderError, setFolderError] = useState<string | null>(null);
   const file = useRef<HTMLInputElement>(null);
   const doc = useMemo(() => parseScript(draft), [draft]);
 
@@ -57,6 +61,25 @@ export function Editor({ library, fallback, onSave, onClose }: Props) {
       const lib = committed();
       load(add(lib, uniqueName(lib, base || nameOf(text)), text, Date.now()));
     });
+  };
+
+  /** Una carpeta con guion.md y sus archivos: suma un guion que muestra diapositivas y videos. */
+  const openFolder = async () => {
+    setFolderError(null);
+    try {
+      const folder = await pickFolder({ directory: true, title: "Carpeta de la presentación" });
+      if (typeof folder !== "string") return;
+      const text = await invoke<string | null>("deck_open", { folder });
+      if (text === null) {
+        setFolderError("En esa carpeta no hay guion.md");
+        return;
+      }
+      const lib = committed();
+      const base = folder.split(/[\\/]/).filter(Boolean).pop() ?? "";
+      load(add(lib, uniqueName(lib, base || nameOf(text)), text, Date.now(), folder));
+    } catch (e) {
+      setFolderError(e instanceof Error ? e.message : String(e));
+    }
   };
 
   const save = () => onSave(committed());
@@ -128,6 +151,21 @@ export function Editor({ library, fallback, onSave, onClose }: Props) {
           <button type="button" onClick={() => file.current?.click()} className={btn}>
             <FileUp className="size-4" /> Abrir .md
           </button>
+          {inTauri() && (
+            <button type="button" onClick={() => void openFolder()} className={btn}>
+              <FolderOpen className="size-4" /> Abrir carpeta
+            </button>
+          )}
+          {folderError && (
+            <span className="text-[var(--color-signal)]" role="alert">
+              {folderError}
+            </span>
+          )}
+          {current.folder && !folderError && (
+            <span className="max-w-[18rem] truncate font-mono text-xs text-[var(--muted)]" title={current.folder}>
+              {current.folder}
+            </span>
+          )}
           <button type="button" onClick={copy} className={btn}>
             <ClipboardCopy className="size-4" /> {copied ? "Copiado" : "Copiar"}
           </button>
@@ -189,13 +227,15 @@ export function Editor({ library, fallback, onSave, onClose }: Props) {
         <aside className="scroll hidden border-l border-[var(--faint)] p-5 text-sm md:block">
           <h3 className="eyebrow m-0 mb-3 text-[0.72rem] font-bold text-[var(--muted)]">Formato</h3>
           <pre className="m-0 whitespace-pre-wrap rounded-md bg-[var(--faint)] p-3 font-mono text-xs leading-relaxed">
-            {"# Sección\n## Punto\nclaves: mcp, agente, eme ce pe\n- Viñeta\nnota: recordatorio"}
+            {"# Sección\n## Punto\nclaves: mcp, agente, eme ce pe\n- Viñeta\nnota: recordatorio\ndiapo: media/portada.png\nvideo: media/demo.mp4 0:12-0:40 auto"}
           </pre>
           <ul className="mt-4 flex flex-col gap-2 pl-4 text-[var(--muted)]">
             <li>Las <strong className="text-[var(--ink)]">claves</strong> son lo que vas a decir de verdad. Pueden ser frases, separadas por comas.</li>
             <li>Si una sigla se transcribe rara, sumá cómo suena: "eme ce pe".</li>
             <li>El título y las viñetas también cuentan, con menos peso.</li>
             <li>Las notas se ven en naranja y no se usan para seguir.</li>
+            <li><strong className="text-[var(--ink)]">diapo</strong> y <strong className="text-[var(--ink)]">video</strong> son lo que ve el público (P). Los archivos salen de la carpeta del guion: "Abrir carpeta" con un guion.md adentro.</li>
+            <li>El video arranca solo con <code>auto</code>; el rango (0:12-0:40) es opcional.</li>
             <li>El guion que está elegido al guardar es el que se usa.</li>
             <li>Ctrl+S guarda.</li>
           </ul>
