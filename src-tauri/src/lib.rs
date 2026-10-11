@@ -1,4 +1,5 @@
 mod audio;
+mod deck;
 mod engine;
 mod llm;
 mod model;
@@ -247,7 +248,8 @@ pub fn run() {
             engine_remote_check,
             share_info,
             share_start,
-            share_stop
+            share_stop,
+            deck::deck_open
         ])
         .build(tauri::generate_context!())
         .expect("no pude arrancar la app")
