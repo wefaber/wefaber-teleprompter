@@ -3,7 +3,14 @@
  * interfaz, como los ajustes. El guion suelto de antes pasa a ser el primero.
  */
 
-export type StoredScript = { id: string; name: string; text: string; updated: number };
+export type StoredScript = {
+  id: string;
+  name: string;
+  text: string;
+  updated: number;
+  /** Carpeta del mazo: de ahí salen las diapositivas y los videos. */
+  folder?: string;
+};
 
 export type Library = { active: string; scripts: StoredScript[] };
 
@@ -64,7 +71,7 @@ export function activeScript(lib: Library): StoredScript {
   return lib.scripts.find((s) => s.id === lib.active) ?? lib.scripts[0]!;
 }
 
-export function update(lib: Library, id: string, patch: Partial<Pick<StoredScript, "name" | "text">>, now: number): Library {
+export function update(lib: Library, id: string, patch: Partial<Pick<StoredScript, "name" | "text" | "folder">>, now: number): Library {
   return {
     ...lib,
     scripts: lib.scripts.map((s) => (s.id === id ? { ...s, ...patch, updated: now } : s)),
@@ -72,8 +79,9 @@ export function update(lib: Library, id: string, patch: Partial<Pick<StoredScrip
 }
 
 /** Suma un guion y lo deja elegido. */
-export function add(lib: Library, name: string, text: string, now: number): Library {
-  const s = { id: newId(), name, text, updated: now };
+export function add(lib: Library, name: string, text: string, now: number, folder?: string): Library {
+  const s: StoredScript = { id: newId(), name, text, updated: now };
+  if (folder) s.folder = folder;
   return { active: s.id, scripts: [...lib.scripts, s] };
 }
 
