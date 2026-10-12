@@ -35,6 +35,11 @@ xAI (ver [Motores de voz](#motores-de-voz)).
 | `phone/` | La página que abre el iPhone (`bun run phone:build` la arma en `dist-phone/`). |
 | `src/lib/script.ts` | El formato del guion. |
 | `src/lib/default-script.md` | Guion de ejemplo (JobIt y LearnIt). |
+| `src/lib/deck.ts` | El mazo: rutas de sus archivos y lo que ve el público. |
+| `src/components/Slide.tsx` | La diapositiva: imagen, HTML aislado, video o el punto en grande. |
+| `src/Audience.tsx` | La página de la ventana del público (`#audiencia`). |
+| `src-tauri/src/deck.rs` | Abre la carpeta del mazo y habilita sus archivos. |
+| `src-tauri/src/audience.rs` | Abre la ventana del público en el otro monitor. |
 | `src-tauri/src/audio.rs` | Micrófono con cpal, pasado a 16 kHz mono. |
 | `src-tauri/src/segmenter.rs` | Corta en frases por energía y pide parciales mientras hablás. |
 | `src-tauri/src/stt.rs` | Hilo de transcripción y eventos a la interfaz. |
@@ -118,6 +123,49 @@ suelto de antes queda como el primero.
 - Abajo del punto actual se ve el que sigue, con sus viñetas.
 - Sensibilidad baja, media o alta en Ajustes; "Avanzar solo" apagado deja solo
   el tachado y avanzás a mano.
+
+## Presentar
+
+Cada punto del guion puede traer lo que ve el público: una diapositiva o un
+video.
+
+```
+# Intro
+## Portada
+claves: hola
+diapo: media/portada.png
+- Quién soy
+
+## Demo
+video: media/demo.mp4 0:12-0:40 auto
+```
+
+- `diapo:` es una imagen (PNG, JPG, WebP, GIF, SVG, AVIF) o un `.html`.
+- `video:` es `archivo [inicio-fin] [auto]`. El rango es opcional y puede
+  quedar abierto (`1:00-` o `-0:30`).
+- Un punto sin `diapo:` muestra su título y sus viñetas en grande. Una línea
+  `diapo:` o `video:` que no nombra un archivo válido sigue siendo viñeta.
+
+**Mazo = carpeta** con `guion.md` y sus archivos (por ejemplo en `media/`):
+Editor (E) → **Abrir carpeta**. Las rutas del guion son relativas a esa
+carpeta. Editar el guion en la app no reescribe `guion.md`: la carpeta es la
+fuente de los archivos, el texto queda guardado en la app como siempre.
+
+- **P** abre la ventana del público: a pantalla completa en el otro monitor;
+  con uno solo, en una ventana para ensayar. Cerrarla (P o Alt+F4) vuelve al
+  modo normal. Si se hace clic en ella, las teclas y el clicker siguen mandando
+  en la principal.
+- **Modo presentación**: con la ventana abierta, por voz solo se pasa al
+  siguiente; los saltos van con flechas, clicker o el índice (O). Abajo dice
+  "Presentando".
+- **Video**: con `auto` arranca al entrar al punto; Espacio lo pausa y lo
+  sigue; al terminar (o al llegar al fin del rango) vuelve a escuchar. Mientras
+  suena, lo que entra por el micrófono no cuenta (es el audio del video).
+  Formatos: MP4 (H.264), WebM, MOV. Un `.mkv` se pasa a MP4 sin recomprimir:
+  `ffmpeg -i toma.mkv -c copy toma.mp4`.
+- **B** pone negro al público. La miniatura abajo muestra lo que está viendo.
+- Las diapositivas `.html` corren aisladas (`sandbox`): su JavaScript anda,
+  pero no toca la app.
 
 ## Motores de voz
 
@@ -347,7 +395,7 @@ unos grados por debajo del lente y se nota. Dos formas de achicarlo:
 
 | Tecla | Acción |
 |---|---|
-| → Espacio Av Pág | Siguiente (un clicker de presentación manda Av Pág) |
+| → Espacio Av Pág | Siguiente (un clicker de presentación manda Av Pág; con video en pantalla, Espacio lo pausa) |
 | ← Re Pág | Anterior |
 | M | Escuchar / pausar |
 | A | Avanzar solo sí / no |
@@ -361,6 +409,8 @@ unos grados por debajo del lente y se nota. Dos formas de achicarlo:
 | F | Pantalla completa |
 | C | Vista previa de la cámara |
 | G | Grabar / terminar la toma |
+| P | Ventana del público |
+| B | Público en negro |
 | R | Reiniciar reloj, base de voz y notas |
 
 ## Actualizaciones
