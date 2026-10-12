@@ -525,7 +525,7 @@ export function SettingsPanel({ settings, onChange, engine, inputs, model, progr
 }
 
 const SHORTCUTS: [string, string][] = [
-  ["→  Espacio  Av Pág", "Punto siguiente"],
+  ["→  Espacio  Av Pág", "Punto siguiente (con video en pantalla, Espacio lo pausa)"],
   ["←  Re Pág", "Punto anterior"],
   ["Inicio", "Volver al primero"],
   ["M", "Escuchar / pausar"],
@@ -540,6 +540,8 @@ const SHORTCUTS: [string, string][] = [
   ["F", "Pantalla completa"],
   ["C", "Vista previa de la cámara"],
   ["G", "Grabar / terminar la toma"],
+  ["P", "Ventana del público (proyector)"],
+  ["B", "Público en negro"],
   ["R", "Reiniciar reloj, base de voz y notas"],
   ["Esc", "Cerrar paneles"],
 ];
