@@ -17,20 +17,23 @@ export function Slide({ state, onVideoEnd }: Props) {
   if (state.slide?.kind === "html")
     // Sin allow-same-origin: corre su JS pero no toca la app.
     return <iframe title={state.title} src={convertFileSrc(state.slide.path)} sandbox="allow-scripts" className="h-full w-full border-0 bg-white" />;
+  // Los márgenes van en unidades del contenedor: en la miniatura, `vw` y `vh` se medirían contra la ventana principal.
   return (
-    <div className="flex h-full w-full flex-col justify-center gap-[4vh] px-[8vw]">
-      <h1 className="title m-0">{state.title}</h1>
-      {state.bullets.length > 0 && (
-        <ul className="m-0 flex list-none flex-col gap-[2vh] p-0">
-          {state.bullets.map((b, i) => (
-            <li key={i} className="bullet flex items-start gap-[0.6em]">
-              <span aria-hidden className="mt-[0.5em] size-[0.35em] shrink-0 rounded-full bg-current" />
-              <span className="min-w-0">{b}</span>
-            </li>
-          ))}
-        </ul>
-      )}
-      {state.missing && <p className="note m-0 font-mono opacity-60">No encuentro {state.missing}</p>}
+    <div className="h-full w-full [container-type:size]">
+      <div className="flex h-full w-full flex-col justify-center gap-[4cqh] px-[8cqw]">
+        <h1 className="title m-0">{state.title}</h1>
+        {state.bullets.length > 0 && (
+          <ul className="m-0 flex list-none flex-col gap-[2cqh] p-0">
+            {state.bullets.map((b, i) => (
+              <li key={i} className="bullet flex items-start gap-[0.6em]">
+                <span aria-hidden className="mt-[0.5em] size-[0.35em] shrink-0 rounded-full bg-current" />
+                <span className="min-w-0">{b}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+        {state.missing && <p className="note m-0 font-mono opacity-60">No encuentro {state.missing}</p>}
+      </div>
     </div>
   );
 }
@@ -40,7 +43,8 @@ function SlideVideo({ video, playing, onEnd }: { video: NonNullable<AudienceStat
   useEffect(() => {
     const v = ref.current;
     if (!v) return;
-    if (playing) v.play().catch(() => onEnd?.());
+    // Un pause() justo después de play() rechaza con AbortError: no es el fin del video.
+    if (playing) v.play().catch((e: unknown) => (e instanceof DOMException && e.name === "AbortError" ? undefined : onEnd?.()));
     else v.pause();
   }, [playing, onEnd]);
   // `#t=` arranca en el inicio del rango sin esperar a que cargue.

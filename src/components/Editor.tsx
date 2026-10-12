@@ -123,7 +123,7 @@ export function Editor({ library, fallback, onSave, onClose }: Props) {
           </button>
           <button type="button" className={btn} onClick={() => {
             const lib = committed();
-            load(add(lib, uniqueName(lib, `${name.trim() || nameOf(draft)} (copia)`), draft, Date.now()));
+            load(add(lib, uniqueName(lib, `${name.trim() || nameOf(draft)} (copia)`), draft, Date.now(), current.folder));
           }}>
             <Copy className="size-4" /> Duplicar
           </button>

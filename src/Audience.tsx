@@ -17,8 +17,10 @@ export function Audience() {
     const off = listen<AudienceState>("audiencia:estado", (e) => setState(e.payload));
     void off.then(() => emitTo("main", "audiencia:lista"));
     const onKey = (e: KeyboardEvent) => {
+      // Con modificadores (Ctrl+R, Alt+F4…) la tecla es del sistema, no del presentador; y no se repite.
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
       e.preventDefault();
-      void emitTo("main", "audiencia:tecla", e.key);
+      if (!e.repeat) void emitTo("main", "audiencia:tecla", e.key);
     };
     window.addEventListener("keydown", onKey);
     return () => {

@@ -335,7 +335,9 @@ export function App() {
   }, [folder]);
 
   // Cada punto con video arranca solo si dice `auto`.
-  useEffect(() => setPlaying(!!point?.video?.auto), [point]);
+  // Por id y no por objeto: guardar el guion lo vuelve a parsear y no tiene que reiniciar un video en curso.
+  const scriptId = activeScript(library).id;
+  useEffect(() => setPlaying(!!point?.video?.auto), [point?.id, scriptId]);
 
   const shown = useMemo(() => audienceState(point, folder, black, playing), [point, folder, black, playing]);
   const shownRef = useRef(shown);
@@ -492,6 +494,8 @@ export function App() {
       if (t instanceof HTMLElement && t.closest("input, select, textarea")) return;
       if (e.ctrlKey || e.metaKey || e.altKey) return;
       const k = e.key;
+      // Mantener P apretada no tiene que abrir y cerrar la ventana en bucle.
+      if (e.repeat && (k === "p" || k === "P" || k === "b" || k === "B")) return;
       const toggle = (p: Exclude<Panel, null>) => setPanel((cur) => (cur === p ? null : p));
       const actions: Record<string, () => void> = {
         ArrowRight: () => jump(index + 1),
