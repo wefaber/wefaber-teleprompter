@@ -1,6 +1,6 @@
 [package]
 name = "wefaber-teleprompter"
-version = "0.2.1"
+version = "0.3.0"
 description = "Apuntador: teleprompter por puntos que sigue lo que decís"
 authors = ["Faku"]
 edition = "2021"
