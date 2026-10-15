@@ -144,6 +144,8 @@ export type TrackerOptions = {
   auto: boolean;
   windowMs: number;
   minDwellMs: number;
+  /** Presentando: por voz solo se pasa al siguiente; los saltos van a mano. */
+  onlyNext?: boolean;
 };
 
 export const DEFAULT_TRACKER: TrackerOptions = {
@@ -173,6 +175,8 @@ export class Tracker {
   private pending: { index: number; t: number } | null = null;
   index = 0;
   covered = new Set<number>();
+  /** Mientras suena un video, lo que entra por el micrófono no es el presentador. */
+  held = false;
 
   options: TrackerOptions;
 
@@ -199,6 +203,7 @@ export class Tracker {
   }
 
   final(text: string, now: number): Snapshot {
+    if (this.held) return this.snapshot();
     this.last = words(text).map(stem);
     for (const s of this.last) this.heard.push({ stem: s, t: now });
     this.interim = [];
@@ -209,6 +214,7 @@ export class Tracker {
   }
 
   partial(text: string, now: number): Snapshot {
+    if (this.held) return this.snapshot();
     this.interim = words(text).map(stem);
     return this.evaluate(now, false);
   }
@@ -278,7 +284,8 @@ export class Tracker {
       return best;
     };
 
-    const near = REACH.map(([offset, reach]) => {
+    const only = this.options.onlyNext === true;
+    const near = REACH.filter(([offset]) => !only || offset === 1).map(([offset, reach]) => {
       // Con todo lo del punto dicho, pasar al siguiente pide menos.
       const easy = offset === 1 && done;
       return {
@@ -290,7 +297,7 @@ export class Tracker {
     });
     // Lejos solo hacia adelante y con evidencia clara: cambiar de tema de
     // golpe pasa, pero volver atrás varios puntos casi siempre es una mención.
-    const far = this.idx
+    const far = only ? [] : this.idx
       .map((_, i) => ({ index: i, reach: 1, hits: level.hits + 2, threshold: level.threshold * 1.8 }))
       .filter((t) => t.index > this.index + 3);
 
@@ -320,7 +327,8 @@ export class Tracker {
    */
   propose(target: number, now: number): Snapshot {
     const offset = target - this.index;
-    if (!this.options.auto || offset === 0 || offset < -1 || offset > 3) return this.snapshot();
+    if (this.held || !this.options.auto || offset === 0 || offset < -1 || offset > 3) return this.snapshot();
+    if (this.options.onlyNext && offset !== 1) return this.snapshot();
     if (now - this.entered < this.options.minDwellMs) return this.snapshot();
     if (this.immediate(target)) return this.move(target, now);
     return this.vote(target, now);

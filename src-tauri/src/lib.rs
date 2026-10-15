@@ -1,4 +1,6 @@
+mod audience;
 mod audio;
+mod deck;
 mod engine;
 mod llm;
 mod model;
@@ -217,6 +219,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_dialog::init())
         .manage(stt::Stt::default())
         .manage(Downloading::default())
         .manage(rec::Rec::default())
@@ -246,11 +249,20 @@ pub fn run() {
             engine_remote_check,
             share_info,
             share_start,
-            share_stop
+            share_stop,
+            deck::deck_open,
+            audience::audience_open,
+            audience::audience_close
         ])
         .build(tauri::generate_context!())
         .expect("no pude arrancar la app")
         .run(|app, event| {
+            // Si se cierra la ventana del público (Alt+F4), la principal sale del modo presentación.
+            if let tauri::RunEvent::WindowEvent { label, event: tauri::WindowEvent::Destroyed, .. } = &event {
+                if label == audience::LABEL {
+                    let _ = tauri::Emitter::emit_to(app, "main", "audiencia:cerrada", ());
+                }
+            }
             // Que el link temporal no quede abierto con la app cerrada.
             if let tauri::RunEvent::Exit = event {
                 let phone = tauri::Manager::state::<phone::Phone>(app);

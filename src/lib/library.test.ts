@@ -49,4 +49,11 @@ describe("library", () => {
     expect(uniqueName(lib(), "Uno")).toBe("Uno (2)");
     expect(uniqueName(lib(), "Cinco")).toBe("Cinco");
   });
+
+  test("un guion puede tener carpeta", () => {
+    const l = add(lib(), "Charla", "# Charla", 1, "C:\\Charlas\\wegraph");
+    expect(activeScript(l).folder).toBe("C:\\Charlas\\wegraph");
+    expect(update(l, l.active, { folder: "D:\\otra" }, 2).scripts.at(-1)?.folder).toBe("D:\\otra");
+    expect(activeScript(add(lib(), "Sin", "# Sin", 1)).folder).toBeUndefined();
+  });
 });

@@ -2,13 +2,16 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { Camera, CircleDot, Headphones, CircleHelp, FolderOpen, Lightbulb, Square, X, ListTree, Maximize, Mic, MicOff, NotebookText, PenLine, SlidersHorizontal } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { emitTo, listen } from "@tauri-apps/api/event";
 import { CameraPreview, previewWidth, useMediaDevices } from "./components/Camera";
 import { PhoneWaiting, usePhone } from "./components/Phone";
 import type { Facing, PhoneScript } from "./lib/phone-protocol";
 import { Editor } from "./components/Editor";
 import { HintPill, Notes } from "./components/Coaching";
 import { Drawer, Help, Outline, ScriptPicker, SettingsPanel } from "./components/Panels";
+import { Slide } from "./components/Slide";
 import { Progress, Stage } from "./components/Stage";
+import { audienceState } from "./lib/deck";
 import type { Prosody } from "./lib/coach";
 import DEFAULT_SCRIPT from "./lib/default-script.md?raw";
 import type { Transport } from "./lib/llm";
@@ -74,8 +77,15 @@ export function App() {
   const [elapsed, setElapsed] = useState(0);
   const clock = useRef({ since: 0, acc: 0 });
 
+  // Presentando: la ventana del público abierta, en negro o con el video sonando.
+  const [audience, setAudience] = useState(false);
+  const [black, setBlack] = useState(false);
+  const [playing, setPlaying] = useState(false);
+  const [presentProblem, setPresentProblem] = useState<string | null>(null);
+
   // El tracker se rehace con cada guion nuevo, conservando el punto.
-  const trackerOptions = { sensitivity: settings.sensitivity, auto: settings.auto, windowMs: 12_000, minDwellMs: 2_500 };
+  // Con el público mirando, un salto equivocado se ve: por voz solo el siguiente.
+  const trackerOptions = { sensitivity: settings.sensitivity, auto: settings.auto, windowMs: 12_000, minDwellMs: 2_500, onlyNext: audience };
   if (trackedDoc.current !== doc) {
     const prev = tracker.current?.index ?? 0;
     const t = new Tracker(doc, trackerOptions);
@@ -86,6 +96,10 @@ export function App() {
   tracker.current.options = trackerOptions;
 
   const index = Math.min(snap.index, Math.max(doc.points.length - 1, 0));
+  const point = doc.points[index];
+  const folder = activeScript(library).folder;
+  // Mientras suena el video el micrófono levanta su audio: no sirve para seguir.
+  tracker.current.held = audience && playing && !!point?.video;
 
   const [send, setSend] = useState<Transport | null>(null);
   const [llmOk, setLlmOk] = useState<boolean | null>(null);
@@ -315,6 +329,52 @@ export function App() {
   useEffect(() => saveSettings(settings), [settings]);
   useEffect(() => saveLibrary(library), [library]);
 
+  // El permiso de la carpeta del mazo no se guarda: se pide de nuevo al abrir.
+  useEffect(() => {
+    if (inTauri() && folder) void invoke("deck_open", { folder }).catch(() => {});
+  }, [folder]);
+
+  // Cada punto con video arranca solo si dice `auto`.
+  // Por id y no por objeto: guardar el guion lo vuelve a parsear y no tiene que reiniciar un video en curso.
+  const scriptId = activeScript(library).id;
+  useEffect(() => setPlaying(!!point?.video?.auto), [point?.id, scriptId]);
+
+  const shown = useMemo(() => audienceState(point, folder, black, playing), [point, folder, black, playing]);
+  const shownRef = useRef(shown);
+  shownRef.current = shown;
+  useEffect(() => {
+    if (audience) void emitTo("audiencia", "audiencia:estado", shown);
+  }, [audience, shown]);
+
+  useEffect(() => {
+    if (!inTauri()) return;
+    const offs = [
+      listen("audiencia:lista", () => void emitTo("audiencia", "audiencia:estado", shownRef.current)),
+      listen<string>("audiencia:tecla", (e) => window.dispatchEvent(new KeyboardEvent("keydown", { key: e.payload }))),
+      listen("audiencia:video-fin", () => setPlaying(false)),
+      listen("audiencia:cerrada", () => {
+        setAudience(false);
+        setBlack(false);
+      }),
+    ];
+    return () => offs.forEach((off) => void off.then((f) => f()));
+  }, []);
+
+  const toggleAudience = useCallback(async () => {
+    setPresentProblem(null);
+    if (!inTauri()) {
+      setPresentProblem("La ventana del público necesita la app instalada");
+      return;
+    }
+    try {
+      await invoke(audience ? "audience_close" : "audience_open");
+      setAudience(!audience);
+      setBlack(false);
+    } catch (e) {
+      setPresentProblem(e instanceof Error ? e.message : String(e));
+    }
+  }, [audience]);
+
   // Reloj: corre mientras escucha.
   useEffect(() => {
     if (speech.state !== "listening") {
@@ -434,10 +494,13 @@ export function App() {
       if (t instanceof HTMLElement && t.closest("input, select, textarea")) return;
       if (e.ctrlKey || e.metaKey || e.altKey) return;
       const k = e.key;
+      // Mantener P apretada no tiene que abrir y cerrar la ventana en bucle.
+      if (e.repeat && (k === "p" || k === "P" || k === "b" || k === "B")) return;
       const toggle = (p: Exclude<Panel, null>) => setPanel((cur) => (cur === p ? null : p));
       const actions: Record<string, () => void> = {
         ArrowRight: () => jump(index + 1),
-        " ": () => jump(index + 1),
+        // Con video en pantalla, Espacio lo pausa y lo sigue.
+        " ": () => (audience && point?.video ? setPlaying((v) => !v) : jump(index + 1)),
         PageDown: () => jump(index + 1),
         ArrowLeft: () => jump(index - 1),
         PageUp: () => jump(index - 1),
@@ -463,6 +526,10 @@ export function App() {
           setElapsed(0);
           coaching.reset();
         },
+        p: () => void toggleAudience(),
+        b: () => {
+          if (audience) setBlack((v) => !v);
+        },
         Escape: () => setPanel(null),
       };
       const act = actions[k.length === 1 ? k.toLowerCase() : k];
@@ -473,7 +540,7 @@ export function App() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [panel, index, jump, toggleMic, patch, settings, fullscreen, speech.state, coaching.reset, toggleRecord]);
+  }, [panel, index, jump, toggleMic, patch, settings, fullscreen, speech.state, coaching.reset, toggleRecord, audience, point, toggleAudience]);
 
   const { bg, ink } = surface(settings.light, settings.brightness);
   const style = { "--bg": bg, "--ink": ink, "--scale": settings.textScale } as CSSProperties;
@@ -499,6 +566,18 @@ export function App() {
           tones={coaching.tones}
           reserve={settings.camera ? { side: settings.cameraCorner.endsWith("izq") ? "left" : "right", width: previewWidth(settings) } : null}
         />}
+      {audience && !lightOnly && (
+        <div
+          aria-label="Lo que ve el público"
+          className={`pointer-events-none absolute bottom-12 ${settings.cameraCorner.endsWith("izq") ? "right-5" : "left-5"} aspect-video w-[18vw] overflow-hidden rounded-md border border-[var(--edge)] bg-black text-white [--scale:0.22]`}
+        >
+          {shown.video ? (
+            <p className="m-0 grid h-full place-items-center font-mono text-xs">{playing ? "Video sonando" : "Video en pausa"}</p>
+          ) : (
+            <Slide key={shown.id} state={shown} />
+          )}
+        </div>
+      )}
       {settings.camera && (
         <CameraPreview
           // Con el iPhone, espejo solo con la frontal: la trasera ya se ve derecha.
@@ -597,6 +676,16 @@ export function App() {
             {sttProblem && (
               <span className="rounded-full border border-[var(--color-signal)] px-2 py-0.5 text-[var(--color-signal)]" role="alert" title={sttProblem}>
                 {sttProblem.length > 60 ? `${sttProblem.slice(0, 60)}…` : sttProblem}
+              </span>
+            )}
+            {audience && (
+              <span title="La ventana del público está abierta: por voz solo se pasa al siguiente">
+                {black ? "Público en negro" : playing && point?.video ? "Público · video" : "Presentando"}
+              </span>
+            )}
+            {presentProblem && (
+              <span className="rounded-full border border-[var(--color-signal)] px-2 py-0.5 text-[var(--color-signal)]" role="alert">
+                {presentProblem}
               </span>
             )}
             {speech.state === "listening" && level.silent && (
